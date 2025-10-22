@@ -54,4 +54,108 @@ mod circuits {
             .owner
             .from_arcis(DepositOutput { processed_amount })
     }
+
+    pub struct DepositSplInput {
+        offer_id: u64,
+        amount: u64,
+    }
+
+    pub struct DepositSplOutput {
+        processed_offer_id: u64,
+        processed_amount: u64,
+    }
+
+    #[instruction]
+    pub fn interchain_origin_evm_deposit_seller_spl(
+        input_ctxt: Enc<Shared, DepositSplInput>,
+    ) -> Enc<Shared, DepositSplOutput> {
+        let input = input_ctxt.to_arcis();
+        let processed_offer_id = input.offer_id;
+        let processed_amount = input.amount;
+        input_ctxt
+            .owner
+            .from_arcis(DepositSplOutput { processed_offer_id, processed_amount })
+    }
+
+    pub struct DepositSellerNativeInput {
+        offer_id: u64,
+        amount: u64,
+    }
+
+    pub struct DepositSellerNativeOutput {
+        processed_offer_id: u64,
+        processed_amount: u64,
+    }
+
+    #[instruction]
+    pub fn deposit_seller_native(
+        input_ctxt: Enc<Shared, DepositSellerNativeInput>,
+    ) -> Enc<Shared, DepositSellerNativeOutput> {
+        let input = input_ctxt.to_arcis();
+        let processed_offer_id = input.offer_id;
+        let processed_amount = input.amount;
+        input_ctxt
+            .owner
+            .from_arcis(DepositSellerNativeOutput { processed_offer_id, processed_amount })
+    }
+
+    pub struct DepositSellerSPLInput {
+        offer_id: u64,
+        amount: u64,
+    }
+
+    pub struct DepositSellerSPLOutput {
+        processed_offer_id: u64,
+        processed_amount: u64,
+    }
+
+    #[instruction]
+    pub fn deposit_seller_spl(
+        input_ctxt: Enc<Shared, DepositSellerSPLInput>,
+    ) -> Enc<Shared, DepositSellerSPLOutput> {
+        let input = input_ctxt.to_arcis();
+        let processed_offer_id = input.offer_id;
+        let processed_amount = input.amount;
+        input_ctxt
+            .owner
+            .from_arcis(DepositSellerSPLOutput { processed_offer_id, processed_amount })
+    }
+
+    pub struct FinalizeInterchainInput {
+        offer_id: u64,
+    }
+
+    pub struct FinalizeInterchainOutput {
+        finalized_offer_id: u64,
+    }
+
+    #[instruction]
+    pub fn finalize_interchain_origin_evm_offer(
+        input_ctxt: Enc<Shared, FinalizeInterchainInput>,
+    ) -> Enc<Shared, FinalizeInterchainOutput> {
+        let input = input_ctxt.to_arcis();
+        let finalized_offer_id = input.offer_id;
+        input_ctxt
+            .owner
+            .from_arcis(FinalizeInterchainOutput { finalized_offer_id })
+    }
+
+    pub struct FinalizeIntrachainInput {
+        offer_id: u64,
+    }
+
+    pub struct FinalizeIntrachainOutput {
+        finalized_offer_id: u64,
+    }
+
+    #[instruction]
+    pub fn finalize_intrachain_offer(
+        input_ctxt: Enc<Shared, FinalizeIntrachainInput>,
+    ) -> Enc<Shared, FinalizeIntrachainOutput> {
+        let input = input_ctxt.to_arcis();
+        let finalized_offer_id = input.offer_id;
+        input_ctxt
+            .owner
+            .from_arcis(FinalizeIntrachainOutput { finalized_offer_id })
+    }
 }
