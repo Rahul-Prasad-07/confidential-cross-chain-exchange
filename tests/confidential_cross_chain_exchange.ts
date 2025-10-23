@@ -236,6 +236,12 @@ describe("ConfidentialCrossChainExchange", () => {
     const depositEventPromise = awaitEvent("confidentialDepositNativeEvent");
     const computationOffset = new anchor.BN(randomBytes(8), "hex");
 
+
+    console.log("amount:", amount.toString());
+    console.log("nonce:", nonce.toString("hex"));
+    console.log("ciphertext:", ciphertext[0]);
+    console.log("publicKey:", publicKey);
+    console.log("plaintext:", plaintext);
     const queueSig = await program.methods
       .confidentialDepositNative(
         computationOffset,
@@ -273,6 +279,9 @@ describe("ConfidentialCrossChainExchange", () => {
       [depositEvent.processedAmount],
       depositEvent.nonce
     )[0];
+
+    console.log("Decrypted amount:", decrypted.toString());
+    console.log("Expected amount:", amount.toString());
     expect(decrypted).to.equal(amount);
   });
 
@@ -836,6 +845,7 @@ describe("ConfidentialCrossChainExchange", () => {
       finalizeTx.sign(owner);
 
       await provider.sendAndConfirm(finalizeTx);
+      console.log("Finalize sig is ", finalizeTx.signature);
     } else if (!offchainSource) {
       const finalizeTx = await buildFinalizeCompDefTx(
         provider as anchor.AnchorProvider,
@@ -850,7 +860,24 @@ describe("ConfidentialCrossChainExchange", () => {
       finalizeTx.sign(owner);
 
       await provider.sendAndConfirm(finalizeTx);
+      console.log("Finalize sig is ", finalizeTx.signature);
     }
+
+    // Always finalize for interchain
+    const finalizeTx = await buildFinalizeCompDefTx(
+      provider as anchor.AnchorProvider,
+      Buffer.from(offset).readUInt32LE(),
+      program.programId
+    );
+
+    const latestBlockhash = await provider.connection.getLatestBlockhash();
+    finalizeTx.recentBlockhash = latestBlockhash.blockhash;
+    finalizeTx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight;
+
+    finalizeTx.sign(owner);
+
+    await provider.sendAndConfirm(finalizeTx);
+    console.log("Finalize sig is ", finalizeTx.signature);
     return sig;
   }
 
