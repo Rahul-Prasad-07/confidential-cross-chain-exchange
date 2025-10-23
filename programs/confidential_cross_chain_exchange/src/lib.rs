@@ -323,11 +323,11 @@ pub mod confidential_cross_chain_exchange {
     pub fn match_orders(
         ctx: Context<MatchOrders>,
         computation_offset: u64,
-        ciphertext_order_ids: [[u8; 32]; 1],
-        ciphertext_sides: [[u8; 32]; 1],
-        ciphertext_prices: [[u8; 32]; 1],
-        ciphertext_sizes: [[u8; 32]; 1],
-        ciphertext_expiries: [[u8; 32]; 1],
+        ciphertext_order_ids: [[u8; 32]; 2],
+        ciphertext_sides: [[u8; 32]; 2],
+        ciphertext_prices: [[u8; 32]; 2],
+        ciphertext_sizes: [[u8; 32]; 2],
+        ciphertext_expiries: [[u8; 32]; 2],
         n_orders: u8,
         pub_key: [u8; 32],
         nonce: u128,
@@ -338,7 +338,7 @@ pub mod confidential_cross_chain_exchange {
             Argument::PlaintextU128(nonce),
             Argument::PlaintextU8(n_orders),
         ];
-        for i in 0..1 {
+        for i in 0..2 {
             args.push(Argument::EncryptedU64(ciphertext_order_ids[i]));
             args.push(Argument::EncryptedU8(ciphertext_sides[i]));
             args.push(Argument::EncryptedU64(ciphertext_prices[i]));

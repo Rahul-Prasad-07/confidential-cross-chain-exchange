@@ -1136,6 +1136,661 @@ describe("ConfidentialCrossChainExchange", () => {
     }
     return sig;
   }
+
+  it("Submit order works!", async () => {
+    const owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
+
+    console.log("Initializing submit order computation definition");
+    const initSOSig = await initSubmitOrderCompDef(
+      program,
+      owner,
+      false,
+      false
+    );
+    console.log(
+      "Submit order computation definition initialized with signature",
+      initSOSig
+    );
+
+    const mxePublicKey = await getMXEPublicKeyWithRetry(
+      provider as anchor.AnchorProvider,
+      program.programId
+    );
+
+    console.log("MXE x25519 pubkey is", mxePublicKey);
+
+    const privateKey = x25519.utils.randomSecretKey();
+    const publicKey = x25519.getPublicKey(privateKey);
+
+    const sharedSecret = x25519.getSharedSecret(privateKey, mxePublicKey);
+    const cipher = new RescueCipher(sharedSecret);
+
+    const orderId = BigInt(12345);
+    const side = BigInt(0); // buy
+    const price = BigInt(100);
+    const size = BigInt(10);
+    const expiry = BigInt(1234567890);
+    const plaintext = [orderId, side, price, size, expiry];
+
+    const nonce = randomBytes(16);
+    const ciphertext = cipher.encrypt(plaintext, nonce);
+
+    const submitEventPromise = awaitEvent("submitOrderEvent");
+    const computationOffset = new anchor.BN(randomBytes(8), "hex");
+
+    const queueSig = await program.methods
+      .submitOrder(
+        computationOffset,
+        Array.from(ciphertext[0]),
+        Array.from(ciphertext[1]),
+        Array.from(ciphertext[2]),
+        Array.from(ciphertext[3]),
+        Array.from(ciphertext[4]),
+        Array.from(publicKey),
+        new anchor.BN(deserializeLE(nonce).toString())
+      )
+      .accountsPartial({
+        computationAccount: getComputationAccAddress(
+          program.programId,
+          computationOffset
+        ),
+        clusterAccount: arciumEnv.arciumClusterPubkey,
+        mxeAccount: getMXEAccAddress(program.programId),
+        mempoolAccount: getMempoolAccAddress(program.programId),
+        executingPool: getExecutingPoolAccAddress(program.programId),
+        compDefAccount: getCompDefAccAddress(
+          program.programId,
+          Buffer.from(getCompDefAccOffset("submit_order")).readUInt32LE()
+        ),
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+    console.log("Queue sig is ", queueSig);
+
+    const finalizeSig = await awaitComputationFinalization(
+      provider as anchor.AnchorProvider,
+      computationOffset,
+      program.programId,
+      "confirmed"
+    );
+    console.log("Finalize sig is ", finalizeSig);
+
+    const submitEvent = await submitEventPromise;
+    const decrypted = cipher.decrypt([new Uint8Array(submitEvent.orderDigest)], submitEvent.nonce)[0];
+    const expectedDigest = orderId + price + size + side;
+    expect(decrypted).to.equal(expectedDigest);
+  });
+
+  it("Match orders works!", async () => {
+    const owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
+
+    console.log("Initializing match orders computation definition");
+    const initMOSig = await initMatchOrdersCompDef(
+      program,
+      owner,
+      false,
+      false
+    );
+    console.log(
+      "Match orders computation definition initialized with signature",
+      initMOSig
+    );
+
+    const mxePublicKey = await getMXEPublicKeyWithRetry(
+      provider as anchor.AnchorProvider,
+      program.programId
+    );
+
+    console.log("MXE x25519 pubkey is", mxePublicKey);
+
+    const privateKey = x25519.utils.randomSecretKey();
+    const publicKey = x25519.getPublicKey(privateKey);
+
+    const sharedSecret = x25519.getSharedSecret(privateKey, mxePublicKey);
+    const cipher = new RescueCipher(sharedSecret);
+
+    // Create test orders: 1 buy order and 1 sell order that can match
+    const buyOrderId = BigInt(1);
+    const buySide = BigInt(0); // buy
+    const buyPrice = BigInt(100);
+    const buySize = BigInt(10);
+    const buyExpiry = BigInt(1234567890);
+
+    const sellOrderId = BigInt(2);
+    const sellSide = BigInt(1); // sell
+    const sellPrice = BigInt(90);
+    const sellSize = BigInt(10);
+    const sellExpiry = BigInt(1234567890);
+
+    // Encrypt each order separately since the program expects arrays of arrays
+    const buyPlaintext = [buyOrderId, buySide, buyPrice, buySize, buyExpiry];
+    const sellPlaintext = [sellOrderId, sellSide, sellPrice, sellSize, sellExpiry];
+
+    const buyNonce = randomBytes(16);
+    const sellNonce = randomBytes(16);
+
+    const buyCiphertext = cipher.encrypt(buyPlaintext, buyNonce);
+    const sellCiphertext = cipher.encrypt(sellPlaintext, sellNonce);
+
+    const matchEventPromise = awaitEvent("matchOrdersEvent");
+    const computationOffset = new anchor.BN(randomBytes(8), "hex");
+
+    const queueSig = await program.methods
+      .matchOrders(
+        computationOffset,
+        [Array.from(buyCiphertext[0]), Array.from(sellCiphertext[0])], // order ids array of 2 elements
+        [Array.from(buyCiphertext[1]), Array.from(sellCiphertext[1])], // sides array of 2 elements
+        [Array.from(buyCiphertext[2]), Array.from(sellCiphertext[2])], // prices array of 2 elements
+        [Array.from(buyCiphertext[3]), Array.from(sellCiphertext[3])], // sizes array of 2 elements
+        [Array.from(buyCiphertext[4]), Array.from(sellCiphertext[4])], // expiries array of 2 elements
+        2, // n_orders
+        Array.from(publicKey),
+        new anchor.BN(deserializeLE(buyNonce).toString()) // use buy nonce
+      )
+      .accountsPartial({
+        computationAccount: getComputationAccAddress(
+          program.programId,
+          computationOffset
+        ),
+        clusterAccount: arciumEnv.arciumClusterPubkey,
+        mxeAccount: getMXEAccAddress(program.programId),
+        mempoolAccount: getMempoolAccAddress(program.programId),
+        executingPool: getExecutingPoolAccAddress(program.programId),
+        compDefAccount: getCompDefAccAddress(
+          program.programId,
+          Buffer.from(getCompDefAccOffset("match_orders")).readUInt32LE()
+        ),
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+    console.log("Queue sig is ", queueSig);
+
+    const finalizeSig = await awaitComputationFinalization(
+      provider as anchor.AnchorProvider,
+      computationOffset,
+      program.programId,
+      "confirmed"
+    );
+    console.log("Finalize sig is ", finalizeSig);
+
+    const matchEvent = await matchEventPromise;
+    // The match event contains ciphertexts array - we expect matches to be found
+    expect(matchEvent.ciphertexts.length).to.be.greaterThan(0);
+  });
+
+  it("Cancel order works!", async () => {
+    const owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
+
+    console.log("Initializing cancel order computation definition");
+    const initCOSig = await initCancelOrderCompDef(
+      program,
+      owner,
+      false,
+      false
+    );
+    console.log(
+      "Cancel order computation definition initialized with signature",
+      initCOSig
+    );
+
+    const mxePublicKey = await getMXEPublicKeyWithRetry(
+      provider as anchor.AnchorProvider,
+      program.programId
+    );
+
+    console.log("MXE x25519 pubkey is", mxePublicKey);
+
+    const privateKey = x25519.utils.randomSecretKey();
+    const publicKey = x25519.getPublicKey(privateKey);
+
+    const sharedSecret = x25519.getSharedSecret(privateKey, mxePublicKey);
+    const cipher = new RescueCipher(sharedSecret);
+
+    const orderId = BigInt(12345);
+    const ownerProof = BigInt(67890);
+    const plaintext = [orderId, ownerProof];
+
+    const nonce = randomBytes(16);
+    const ciphertext = cipher.encrypt(plaintext, nonce);
+
+    const cancelEventPromise = awaitEvent("cancelOrderEvent");
+    const computationOffset = new anchor.BN(randomBytes(8), "hex");
+
+    const queueSig = await program.methods
+      .cancelOrder(
+        computationOffset,
+        Array.from(ciphertext[0]),
+        Array.from(ciphertext[1]),
+        Array.from(publicKey),
+        new anchor.BN(deserializeLE(nonce).toString())
+      )
+      .accountsPartial({
+        computationAccount: getComputationAccAddress(
+          program.programId,
+          computationOffset
+        ),
+        clusterAccount: arciumEnv.arciumClusterPubkey,
+        mxeAccount: getMXEAccAddress(program.programId),
+        mempoolAccount: getMempoolAccAddress(program.programId),
+        executingPool: getExecutingPoolAccAddress(program.programId),
+        compDefAccount: getCompDefAccAddress(
+          program.programId,
+          Buffer.from(getCompDefAccOffset("cancel_order")).readUInt32LE()
+        ),
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+    console.log("Queue sig is ", queueSig);
+
+    const finalizeSig = await awaitComputationFinalization(
+      provider as anchor.AnchorProvider,
+      computationOffset,
+      program.programId,
+      "confirmed"
+    );
+    console.log("Finalize sig is ", finalizeSig);
+
+    const cancelEvent = await cancelEventPromise;
+    const decrypted = cipher.decrypt([new Uint8Array(cancelEvent.cancelledOrderId)], cancelEvent.nonce)[0];
+    expect(decrypted).to.equal(orderId);
+  });
+
+  it("Settle match works!", async () => {
+    const owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
+
+    console.log("Initializing settle match computation definition");
+    const initSMSig = await initSettleMatchCompDef(
+      program,
+      owner,
+      false,
+      false
+    );
+    console.log(
+      "Settle match computation definition initialized with signature",
+      initSMSig
+    );
+
+    const mxePublicKey = await getMXEPublicKeyWithRetry(
+      provider as anchor.AnchorProvider,
+      program.programId
+    );
+
+    console.log("MXE x25519 pubkey is", mxePublicKey);
+
+    const privateKey = x25519.utils.randomSecretKey();
+    const publicKey = x25519.getPublicKey(privateKey);
+
+    const sharedSecret = x25519.getSharedSecret(privateKey, mxePublicKey);
+    const cipher = new RescueCipher(sharedSecret);
+
+    const buyOrderId = BigInt(1);
+    const sellOrderId = BigInt(2);
+    const matchedPrice = BigInt(100);
+    const matchedSize = BigInt(10);
+    const depositProof1 = BigInt(111);
+    const depositProof2 = BigInt(222);
+    const depositProof3 = BigInt(333);
+    const depositProof4 = BigInt(444);
+
+    const plaintext = [buyOrderId, sellOrderId, matchedPrice, matchedSize, depositProof1, depositProof2, depositProof3, depositProof4];
+
+    const nonce = randomBytes(16);
+    const ciphertext = cipher.encrypt(plaintext, nonce);
+
+    const settleEventPromise = awaitEvent("settleMatchEvent");
+    const computationOffset = new anchor.BN(randomBytes(8), "hex");
+
+    const queueSig = await program.methods
+      .settleMatch(
+        computationOffset,
+        Array.from(ciphertext[0]), // buy order id
+        Array.from(ciphertext[1]), // sell order id
+        Array.from(ciphertext[2]), // matched price
+        Array.from(ciphertext[3]), // matched size
+        [
+          Array.from(ciphertext[4]), // deposit proof 1
+          Array.from(ciphertext[5]), // deposit proof 2
+          Array.from(ciphertext[6]), // deposit proof 3
+          Array.from(ciphertext[7]), // deposit proof 4
+        ],
+        4, // n_deposit_proofs
+        Array.from(publicKey),
+        new anchor.BN(deserializeLE(nonce).toString())
+      )
+      .accountsPartial({
+        computationAccount: getComputationAccAddress(
+          program.programId,
+          computationOffset
+        ),
+        clusterAccount: arciumEnv.arciumClusterPubkey,
+        mxeAccount: getMXEAccAddress(program.programId),
+        mempoolAccount: getMempoolAccAddress(program.programId),
+        executingPool: getExecutingPoolAccAddress(program.programId),
+        compDefAccount: getCompDefAccAddress(
+          program.programId,
+          Buffer.from(getCompDefAccOffset("settle_match")).readUInt32LE()
+        ),
+      })
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+    console.log("Queue sig is ", queueSig);
+
+    const finalizeSig = await awaitComputationFinalization(
+      provider as anchor.AnchorProvider,
+      computationOffset,
+      program.programId,
+      "confirmed"
+    );
+    console.log("Finalize sig is ", finalizeSig);
+
+    const settleEvent = await settleEventPromise;
+    // The settle event contains ciphertexts array with settlement directives
+    expect(settleEvent.ciphertexts.length).to.equal(13); // 4 settlement directives * 3 fields + metadata
+  });
+
+  async function initSubmitOrderCompDef(
+    program: Program<ConfidentialCrossChainExchange>,
+    owner: anchor.web3.Keypair,
+    uploadRawCircuit: boolean,
+    offchainSource: boolean
+  ): Promise<string> {
+    const baseSeedCompDefAcc = getArciumAccountBaseSeed(
+      "ComputationDefinitionAccount"
+    );
+    const offset = getCompDefAccOffset("submit_order");
+
+    const compDefPDA = PublicKey.findProgramAddressSync(
+      [baseSeedCompDefAcc, program.programId.toBuffer(), offset],
+      getArciumProgAddress()
+    )[0];
+
+    console.log("Comp def pda is ", compDefPDA);
+
+    let sig: string;
+    try {
+      sig = await program.methods
+        .initSubmitOrderCompDef()
+        .accounts({
+          compDefAccount: compDefPDA,
+          payer: owner.publicKey,
+          mxeAccount: getMXEAccAddress(program.programId),
+        })
+        .signers([owner])
+        .rpc({
+          commitment: "confirmed",
+        });
+      console.log("Init submit order computation definition transaction", sig);
+    } catch (error: any) {
+      if (error.message.includes("account already in use") || error.message.includes("already in use")) {
+        console.log("Submit order computation definition already initialized, skipping...");
+        sig = "already-initialized";
+      } else {
+        throw error;
+      }
+    }
+
+    if (uploadRawCircuit) {
+      const rawCircuit = fs.readFileSync("build/submit_order.arcis");
+
+      await uploadCircuit(
+        provider as anchor.AnchorProvider,
+        "submit_order",
+        program.programId,
+        rawCircuit,
+        true
+      );
+    } else if (!offchainSource) {
+      try {
+        const finalizeTx = await buildFinalizeCompDefTx(
+          provider as anchor.AnchorProvider,
+          Buffer.from(offset).readUInt32LE(),
+          program.programId
+        );
+
+        const latestBlockhash = await provider.connection.getLatestBlockhash();
+        finalizeTx.recentBlockhash = latestBlockhash.blockhash;
+        finalizeTx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight;
+
+        finalizeTx.sign(owner);
+
+        await provider.sendAndConfirm(finalizeTx);
+      } catch (error: any) {
+        if (error.message.includes("already finalized") || error.message.includes("already in use")) {
+          console.log("Submit order computation definition already finalized, skipping...");
+        } else {
+          throw error;
+        }
+      }
+    }
+    return sig;
+  }
+
+  async function initMatchOrdersCompDef(
+    program: Program<ConfidentialCrossChainExchange>,
+    owner: anchor.web3.Keypair,
+    uploadRawCircuit: boolean,
+    offchainSource: boolean
+  ): Promise<string> {
+    const baseSeedCompDefAcc = getArciumAccountBaseSeed(
+      "ComputationDefinitionAccount"
+    );
+    const offset = getCompDefAccOffset("match_orders");
+
+    const compDefPDA = PublicKey.findProgramAddressSync(
+      [baseSeedCompDefAcc, program.programId.toBuffer(), offset],
+      getArciumProgAddress()
+    )[0];
+
+    console.log("Comp def pda is ", compDefPDA);
+
+    let sig: string;
+    try {
+      sig = await program.methods
+        .initMatchOrdersCompDef()
+        .accounts({
+          compDefAccount: compDefPDA,
+          payer: owner.publicKey,
+          mxeAccount: getMXEAccAddress(program.programId),
+        })
+        .signers([owner])
+        .rpc({
+          commitment: "confirmed",
+        });
+      console.log("Init match orders computation definition transaction", sig);
+    } catch (error: any) {
+      if (error.message.includes("account already in use") || error.message.includes("already in use")) {
+        console.log("Match orders computation definition already initialized, skipping...");
+        sig = "already-initialized";
+      } else {
+        throw error;
+      }
+    }
+
+    if (uploadRawCircuit) {
+      const rawCircuit = fs.readFileSync("build/match_orders.arcis");
+
+      await uploadCircuit(
+        provider as anchor.AnchorProvider,
+        "match_orders",
+        program.programId,
+        rawCircuit,
+        true
+      );
+    } else if (!offchainSource) {
+      try {
+        const finalizeTx = await buildFinalizeCompDefTx(
+          provider as anchor.AnchorProvider,
+          Buffer.from(offset).readUInt32LE(),
+          program.programId
+        );
+
+        const latestBlockhash = await provider.connection.getLatestBlockhash();
+        finalizeTx.recentBlockhash = latestBlockhash.blockhash;
+        finalizeTx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight;
+
+        finalizeTx.sign(owner);
+
+        await provider.sendAndConfirm(finalizeTx);
+      } catch (error: any) {
+        if (error.message.includes("already finalized") || error.message.includes("already in use")) {
+          console.log("Match orders computation definition already finalized, skipping...");
+        } else {
+          throw error;
+        }
+      }
+    }
+    return sig;
+  }
+
+  async function initCancelOrderCompDef(
+    program: Program<ConfidentialCrossChainExchange>,
+    owner: anchor.web3.Keypair,
+    uploadRawCircuit: boolean,
+    offchainSource: boolean
+  ): Promise<string> {
+    const baseSeedCompDefAcc = getArciumAccountBaseSeed(
+      "ComputationDefinitionAccount"
+    );
+    const offset = getCompDefAccOffset("cancel_order");
+
+    const compDefPDA = PublicKey.findProgramAddressSync(
+      [baseSeedCompDefAcc, program.programId.toBuffer(), offset],
+      getArciumProgAddress()
+    )[0];
+
+    console.log("Comp def pda is ", compDefPDA);
+
+    let sig: string;
+    try {
+      sig = await program.methods
+        .initCancelOrderCompDef()
+        .accounts({
+          compDefAccount: compDefPDA,
+          payer: owner.publicKey,
+          mxeAccount: getMXEAccAddress(program.programId),
+        })
+        .signers([owner])
+        .rpc({
+          commitment: "confirmed",
+        });
+      console.log("Init cancel order computation definition transaction", sig);
+    } catch (error: any) {
+      if (error.message.includes("account already in use") || error.message.includes("already in use")) {
+        console.log("Cancel order computation definition already initialized, skipping...");
+        sig = "already-initialized";
+      } else {
+        throw error;
+      }
+    }
+
+    if (uploadRawCircuit) {
+      const rawCircuit = fs.readFileSync("build/cancel_order.arcis");
+
+      await uploadCircuit(
+        provider as anchor.AnchorProvider,
+        "cancel_order",
+        program.programId,
+        rawCircuit,
+        true
+      );
+    } else if (!offchainSource) {
+      try {
+        const finalizeTx = await buildFinalizeCompDefTx(
+          provider as anchor.AnchorProvider,
+          Buffer.from(offset).readUInt32LE(),
+          program.programId
+        );
+
+        const latestBlockhash = await provider.connection.getLatestBlockhash();
+        finalizeTx.recentBlockhash = latestBlockhash.blockhash;
+        finalizeTx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight;
+
+        finalizeTx.sign(owner);
+
+        await provider.sendAndConfirm(finalizeTx);
+      } catch (error: any) {
+        if (error.message.includes("already finalized") || error.message.includes("already in use")) {
+          console.log("Cancel order computation definition already finalized, skipping...");
+        } else {
+          throw error;
+        }
+      }
+    }
+    return sig;
+  }
+
+  async function initSettleMatchCompDef(
+    program: Program<ConfidentialCrossChainExchange>,
+    owner: anchor.web3.Keypair,
+    uploadRawCircuit: boolean,
+    offchainSource: boolean
+  ): Promise<string> {
+    const baseSeedCompDefAcc = getArciumAccountBaseSeed(
+      "ComputationDefinitionAccount"
+    );
+    const offset = getCompDefAccOffset("settle_match");
+
+    const compDefPDA = PublicKey.findProgramAddressSync(
+      [baseSeedCompDefAcc, program.programId.toBuffer(), offset],
+      getArciumProgAddress()
+    )[0];
+
+    console.log("Comp def pda is ", compDefPDA);
+
+    let sig: string;
+    try {
+      sig = await program.methods
+        .initSettleMatchCompDef()
+        .accounts({
+          compDefAccount: compDefPDA,
+          payer: owner.publicKey,
+          mxeAccount: getMXEAccAddress(program.programId),
+        })
+        .signers([owner])
+        .rpc({
+          commitment: "confirmed",
+        });
+      console.log("Init settle match computation definition transaction", sig);
+    } catch (error: any) {
+      if (error.message.includes("account already in use") || error.message.includes("already in use")) {
+        console.log("Settle match computation definition already initialized, skipping...");
+        sig = "already-initialized";
+      } else {
+        throw error;
+      }
+    }
+
+    if (uploadRawCircuit) {
+      const rawCircuit = fs.readFileSync("build/settle_match.arcis");
+
+      await uploadCircuit(
+        provider as anchor.AnchorProvider,
+        "settle_match",
+        program.programId,
+        rawCircuit,
+        true
+      );
+    } else if (!offchainSource) {
+      try {
+        const finalizeTx = await buildFinalizeCompDefTx(
+          provider as anchor.AnchorProvider,
+          Buffer.from(offset).readUInt32LE(),
+          program.programId
+        );
+
+        const latestBlockhash = await provider.connection.getLatestBlockhash();
+        finalizeTx.recentBlockhash = latestBlockhash.blockhash;
+        finalizeTx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight;
+
+        finalizeTx.sign(owner);
+
+        await provider.sendAndConfirm(finalizeTx);
+      } catch (error: any) {
+        if (error.message.includes("already finalized") || error.message.includes("already in use")) {
+          console.log("Settle match computation definition already finalized, skipping...");
+        } else {
+          throw error;
+        }
+      }
+    }
+    return sig;
+  }
 });
 
 async function getMXEPublicKeyWithRetry(

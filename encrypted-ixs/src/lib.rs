@@ -188,7 +188,7 @@ mod circuits {
     }
 
     // Arcis constraints: avoid Vec, while, ranges. Use fixed-size arrays.
-    pub const MAX_ORDERS: usize = 1;
+    pub const MAX_ORDERS: usize = 2;
 
     pub struct MatchOrdersInput {
         orders: [SubmitOrderInput; MAX_ORDERS],
