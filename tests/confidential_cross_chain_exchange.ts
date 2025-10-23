@@ -283,7 +283,7 @@ describe("ConfidentialCrossChainExchange", () => {
     const initIEDSSSig = await initInterchainOriginEvmDepositSellerSplCompDef(
       program,
       owner,
-      false,
+      true,
       false
     );
     console.log(
@@ -349,8 +349,9 @@ describe("ConfidentialCrossChainExchange", () => {
     console.log("Finalize sig is ", finalizeSig);
 
     const depositEvent = await depositEventPromise;
-    const decryptedOfferId = cipher.decrypt([depositEvent.processedOfferId], depositEvent.nonce)[0];
-    const decryptedAmount = cipher.decrypt([depositEvent.processedAmount], depositEvent.nonce)[1];
+    const decrypted = cipher.decrypt([new Uint8Array(depositEvent.processedOfferId), new Uint8Array(depositEvent.processedAmount)], depositEvent.nonce);
+    const decryptedOfferId = decrypted[0];
+    const decryptedAmount = decrypted[1];
     expect(decryptedOfferId).to.equal(offerId);
     expect(decryptedAmount).to.equal(amount);
   });
@@ -501,9 +502,12 @@ describe("ConfidentialCrossChainExchange", () => {
     console.log("Finalize sig is ", finalizeSig);
 
     const depositEvent = await depositEventPromise;
-    const decryptedOfferId = cipher.decrypt([depositEvent.processedOfferId], depositEvent.nonce)[0];
-    const decryptedAmount = cipher.decrypt([depositEvent.processedAmount], depositEvent.nonce)[1];
+    const decrypted = cipher.decrypt([new Uint8Array(depositEvent.processedOfferId), new Uint8Array(depositEvent.processedAmount)], depositEvent.nonce);
+    const decryptedOfferId = decrypted[0];
+    const decryptedAmount = decrypted[1];
     expect(decryptedOfferId).to.equal(offerId);
+    console.log("Decrypted amount:", decryptedAmount.toString());
+    console.log("Expected amount:", amount.toString());
     expect(decryptedAmount).to.equal(amount);
   });
 
@@ -579,8 +583,9 @@ describe("ConfidentialCrossChainExchange", () => {
     console.log("Finalize sig is ", finalizeSig);
 
     const depositEvent = await depositEventPromise;
-    const decryptedOfferId = cipher.decrypt([depositEvent.processedOfferId], depositEvent.nonce)[0];
-    const decryptedAmount = cipher.decrypt([depositEvent.processedAmount], depositEvent.nonce)[1];
+    const decrypted = cipher.decrypt([new Uint8Array(depositEvent.processedOfferId), new Uint8Array(depositEvent.processedAmount)], depositEvent.nonce);
+    const decryptedOfferId = decrypted[0];
+    const decryptedAmount = decrypted[1];
     expect(decryptedOfferId).to.equal(offerId);
     expect(decryptedAmount).to.equal(amount);
   });
@@ -801,17 +806,36 @@ describe("ConfidentialCrossChainExchange", () => {
     );
 
     if (uploadRawCircuit) {
-      const rawCircuit = fs.readFileSync(
-        "build/interchain_origin_evm_deposit_seller_spl.arcis"
+      try {
+        const rawCircuit = fs.readFileSync(
+          "build/interchain_origin_evm_deposit_seller_spl.arcis"
+        );
+
+        await uploadCircuit(
+          provider as anchor.AnchorProvider,
+          "interchain_origin_evm_deposit_seller_spl",
+          program.programId,
+          rawCircuit,
+          true
+        );
+      } catch (error) {
+        console.log("Upload failed, perhaps already uploaded", error.message);
+      }
+
+      // Finalize after upload
+      const finalizeTx = await buildFinalizeCompDefTx(
+        provider as anchor.AnchorProvider,
+        Buffer.from(offset).readUInt32LE(),
+        program.programId
       );
 
-      await uploadCircuit(
-        provider as anchor.AnchorProvider,
-        "interchain_origin_evm_deposit_seller_spl",
-        program.programId,
-        rawCircuit,
-        true
-      );
+      const latestBlockhash = await provider.connection.getLatestBlockhash();
+      finalizeTx.recentBlockhash = latestBlockhash.blockhash;
+      finalizeTx.lastValidBlockHeight = latestBlockhash.lastValidBlockHeight;
+
+      finalizeTx.sign(owner);
+
+      await provider.sendAndConfirm(finalizeTx);
     } else if (!offchainSource) {
       const finalizeTx = await buildFinalizeCompDefTx(
         provider as anchor.AnchorProvider,
