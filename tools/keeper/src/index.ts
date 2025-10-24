@@ -21,10 +21,6 @@ import {
 } from "@arcium-hq/client";
 import * as fs from "fs";
 import * as os from "os";
-import * as dotenv from "dotenv";
-
-// Load environment variables from .env file
-dotenv.config();
 
 async function main() {
   // Configure the client to use the local cluster.
@@ -169,9 +165,6 @@ async function triggerSampleMatch(
   console.log("Triggering sample match...");
 
   const mxePublicKey = await getMXEPublicKey(provider, program.programId);
-  if (!mxePublicKey) {
-    throw new Error("Failed to get MXE public key");
-  }
 
   const privateKey = x25519.utils.randomSecretKey();
   const publicKey = x25519.getPublicKey(privateKey);
