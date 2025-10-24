@@ -10,9 +10,7 @@ const COMP_DEF_OFFSET_DEPOSIT_SELLER_NATIVE: u32 = comp_def_offset("deposit_sell
 const COMP_DEF_OFFSET_DEPOSIT_SELLER_SPL: u32 = comp_def_offset("deposit_seller_spl");
 const COMP_DEF_OFFSET_FINALIZE_INTRACHAIN_OFFER: u32 = comp_def_offset("finalize_intrachain_offer");
 const COMP_DEF_OFFSET_SUBMIT_ORDER: u32 = comp_def_offset("submit_order");
-const COMP_DEF_OFFSET_MATCH_ORDERS: u32 = comp_def_offset("match_orders");
-const COMP_DEF_OFFSET_CANCEL_ORDER: u32 = comp_def_offset("cancel_order");
-const COMP_DEF_OFFSET_SETTLE_MATCH: u32 = comp_def_offset("settle_match");
+const COMP_DEF_OFFSET_SETTLE_WITH_PROOF: u32 = comp_def_offset("settle_with_proof");
 
 
 declare_id!("DzueqW4xsJRhv5pQdcwTsWgeKcV2xfEoKRALN4Ma8dHd");
@@ -272,17 +270,7 @@ pub mod confidential_cross_chain_exchange {
         Ok(())
     }
 
-    pub fn init_match_orders_comp_def(ctx: Context<InitMatchOrdersCompDef>) -> Result<()> {
-        init_comp_def(ctx.accounts, true, 0, None, None)?;
-        Ok(())
-    }
-
-    pub fn init_cancel_order_comp_def(ctx: Context<InitCancelOrderCompDef>) -> Result<()> {
-        init_comp_def(ctx.accounts, true, 0, None, None)?;
-        Ok(())
-    }
-
-    pub fn init_settle_match_comp_def(ctx: Context<InitSettleMatchCompDef>) -> Result<()> {
+    pub fn init_settle_with_proof_comp_def(ctx: Context<InitSettleWithProofCompDef>) -> Result<()> {
         init_comp_def(ctx.accounts, true, 0, None, None)?;
         Ok(())
     }
@@ -320,83 +308,25 @@ pub mod confidential_cross_chain_exchange {
         Ok(())
     }
 
-    pub fn match_orders(
-        ctx: Context<MatchOrders>,
-        computation_offset: u64,
-        ciphertext_order_ids: Vec<[u8; 32]>,
-        ciphertext_sides: Vec<[u8; 32]>,
-        ciphertext_prices: Vec<[u8; 32]>,
-        ciphertext_sizes: Vec<[u8; 32]>,
-        ciphertext_expiries: Vec<[u8; 32]>,
-        n_orders: u8,
-        pub_key: [u8; 32],
-        nonce: u128,
-    ) -> Result<()> {
-        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
-        let mut args = vec![
-            Argument::ArcisPubkey(pub_key),
-            Argument::PlaintextU128(nonce),
-            Argument::PlaintextU8(n_orders),
-        ];
-        for i in 0..ciphertext_order_ids.len() {
-            args.push(Argument::EncryptedU64(ciphertext_order_ids[i]));
-            args.push(Argument::EncryptedU8(ciphertext_sides[i]));
-            args.push(Argument::EncryptedU64(ciphertext_prices[i]));
-            args.push(Argument::EncryptedU64(ciphertext_sizes[i]));
-            args.push(Argument::EncryptedU64(ciphertext_expiries[i]));
-        }
-
-        queue_computation(
-            ctx.accounts,
-            computation_offset,
-            args,
-            None,
-            vec![MatchOrdersCallback::callback_ix(&[])],
-        )?;
-
-        Ok(())
-    }
-
-    pub fn cancel_order(
-        ctx: Context<CancelOrder>,
-        computation_offset: u64,
-        ciphertext_order_id: [u8; 32],
-        ciphertext_owner_proof: [u8; 32],
-        pub_key: [u8; 32],
-        nonce: u128,
-    ) -> Result<()> {
-        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
-        let args = vec![
-            Argument::ArcisPubkey(pub_key),
-            Argument::PlaintextU128(nonce),
-            Argument::EncryptedU64(ciphertext_order_id),
-            Argument::EncryptedU64(ciphertext_owner_proof),
-        ];
-
-        queue_computation(
-            ctx.accounts,
-            computation_offset,
-            args,
-            None,
-            vec![CancelOrderCallback::callback_ix(&[])],
-        )?;
-
-        Ok(())
-    }
-
-    pub fn settle_match(
-        ctx: Context<SettleMatch>,
+    pub fn settle_with_proof(
+        ctx: Context<SettleWithProof>,
         computation_offset: u64,
         ciphertext_buy_order_id: [u8; 32],
         ciphertext_sell_order_id: [u8; 32],
         ciphertext_matched_price: [u8; 32],
         ciphertext_matched_size: [u8; 32],
-        ciphertext_deposit_proofs: Vec<[u8; 32]>,
+        ciphertext_deposit_proofs: Vec<u8>,
         n_deposit_proofs: u8,
         pub_key: [u8; 32],
         nonce: u128,
     ) -> Result<()> {
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+        let n_deposit_proofs_usize = n_deposit_proofs as usize;
+        require!(
+            n_deposit_proofs_usize <= 4,
+            ErrorCode::TooManyDepositProofs
+        );
+        let deposit_proofs: Vec<[u8; 32]> = ciphertext_deposit_proofs.chunks_exact(32).map(|chunk| chunk.try_into().unwrap()).collect();
         let mut args = vec![
             Argument::ArcisPubkey(pub_key),
             Argument::PlaintextU128(nonce),
@@ -406,8 +336,8 @@ pub mod confidential_cross_chain_exchange {
             Argument::EncryptedU64(ciphertext_matched_size),
             Argument::PlaintextU8(n_deposit_proofs),
         ];
-        for i in 0..ciphertext_deposit_proofs.len() {
-            args.push(Argument::EncryptedU64(ciphertext_deposit_proofs[i]));
+        for i in 0..n_deposit_proofs_usize {
+            args.push(Argument::EncryptedU64(deposit_proofs[i]));
         }
 
         queue_computation(
@@ -415,7 +345,7 @@ pub mod confidential_cross_chain_exchange {
             computation_offset,
             args,
             None,
-            vec![SettleMatchCallback::callback_ix(&[])],
+            vec![SettleWithProofCallback::callback_ix(&[])],
         )?;
 
         Ok(())
@@ -578,51 +508,17 @@ pub mod confidential_cross_chain_exchange {
         Ok(())
     }
 
-    #[arcium_callback(encrypted_ix = "match_orders")]
-    pub fn match_orders_callback(
-        ctx: Context<MatchOrdersCallback>,
-        output: ComputationOutputs<MatchOrdersOutput>,
+    #[arcium_callback(encrypted_ix = "settle_with_proof")]
+    pub fn settle_with_proof_callback(
+        ctx: Context<SettleWithProofCallback>,
+        output: ComputationOutputs<SettleWithProofOutput>,
     ) -> Result<()> {
         let o = match output {
-            ComputationOutputs::Success(MatchOrdersOutput { field_0 }) => field_0,
+            ComputationOutputs::Success(SettleWithProofOutput { field_0 }) => field_0,
             _ => return Err(ErrorCode::AbortedComputation.into()),
         };
 
-        emit!(MatchOrdersEvent {
-            ciphertexts: o.ciphertexts.to_vec(),
-            nonce: o.nonce.to_le_bytes(),
-        });
-        Ok(())
-    }
-
-    #[arcium_callback(encrypted_ix = "cancel_order")]
-    pub fn cancel_order_callback(
-        ctx: Context<CancelOrderCallback>,
-        output: ComputationOutputs<CancelOrderOutput>,
-    ) -> Result<()> {
-        let o = match output {
-            ComputationOutputs::Success(CancelOrderOutput { field_0 }) => field_0,
-            _ => return Err(ErrorCode::AbortedComputation.into()),
-        };
-
-        emit!(CancelOrderEvent {
-            cancelled_order_id: o.ciphertexts[0],
-            nonce: o.nonce.to_le_bytes(),
-        });
-        Ok(())
-    }
-
-    #[arcium_callback(encrypted_ix = "settle_match")]
-    pub fn settle_match_callback(
-        ctx: Context<SettleMatchCallback>,
-        output: ComputationOutputs<SettleMatchOutput>,
-    ) -> Result<()> {
-        let o = match output {
-            ComputationOutputs::Success(SettleMatchOutput { field_0 }) => field_0,
-            _ => return Err(ErrorCode::AbortedComputation.into()),
-        };
-
-        emit!(SettleMatchEvent {
+        emit!(SettleWithProofEvent {
             ciphertexts: o.ciphertexts,
             nonce: o.nonce.to_le_bytes(),
         });
@@ -1162,10 +1058,10 @@ pub struct SubmitOrder<'info> {
     pub arcium_program: Program<'info, Arcium>,
 }
 
-#[queue_computation_accounts("match_orders", payer)]
+#[queue_computation_accounts("settle_with_proof", payer)]
 #[derive(Accounts)]
 #[instruction(computation_offset: u64)]
-pub struct MatchOrders<'info> {
+pub struct SettleWithProof<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     #[account(
@@ -1200,125 +1096,7 @@ pub struct MatchOrders<'info> {
     /// CHECK: computation_account, checked by the arcium program.
     pub computation_account: UncheckedAccount<'info>,
     #[account(
-        address = derive_comp_def_pda!(COMP_DEF_OFFSET_MATCH_ORDERS)
-    )]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
-    #[account(
-        mut,
-        address = derive_cluster_pda!(mxe_account)
-    )]
-    pub cluster_account: Account<'info, Cluster>,
-    #[account(
-        mut,
-        address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS,
-    )]
-    pub pool_account: Account<'info, FeePool>,
-    #[account(
-        address = ARCIUM_CLOCK_ACCOUNT_ADDRESS
-    )]
-    pub clock_account: Account<'info, ClockAccount>,
-    pub system_program: Program<'info, System>,
-    pub arcium_program: Program<'info, Arcium>,
-}
-
-#[queue_computation_accounts("cancel_order", payer)]
-#[derive(Accounts)]
-#[instruction(computation_offset: u64)]
-pub struct CancelOrder<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    #[account(
-        init_if_needed,
-        space = 9,
-        payer = payer,
-        seeds = [&SIGN_PDA_SEED],
-        bump,
-        address = derive_sign_pda!(),
-    )]
-    pub sign_pda_account: Account<'info, SignerAccount>,
-    #[account(
-        address = derive_mxe_pda!()
-    )]
-    pub mxe_account: Account<'info, MXEAccount>,
-    #[account(
-        mut,
-        address = derive_mempool_pda!()
-    )]
-    /// CHECK: mempool_account, checked by the arcium program.
-    pub mempool_account: UncheckedAccount<'info>,
-    #[account(
-        mut,
-        address = derive_execpool_pda!()
-    )]
-    /// CHECK: executing_pool, checked by the arcium program.
-    pub executing_pool: UncheckedAccount<'info>,
-    #[account(
-        mut,
-        address = derive_comp_pda!(computation_offset)
-    )]
-    /// CHECK: computation_account, checked by the arcium program.
-    pub computation_account: UncheckedAccount<'info>,
-    #[account(
-        address = derive_comp_def_pda!(COMP_DEF_OFFSET_CANCEL_ORDER)
-    )]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
-    #[account(
-        mut,
-        address = derive_cluster_pda!(mxe_account)
-    )]
-    pub cluster_account: Account<'info, Cluster>,
-    #[account(
-        mut,
-        address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS,
-    )]
-    pub pool_account: Account<'info, FeePool>,
-    #[account(
-        address = ARCIUM_CLOCK_ACCOUNT_ADDRESS
-    )]
-    pub clock_account: Account<'info, ClockAccount>,
-    pub system_program: Program<'info, System>,
-    pub arcium_program: Program<'info, Arcium>,
-}
-
-#[queue_computation_accounts("settle_match", payer)]
-#[derive(Accounts)]
-#[instruction(computation_offset: u64)]
-pub struct SettleMatch<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    #[account(
-        init_if_needed,
-        space = 9,
-        payer = payer,
-        seeds = [&SIGN_PDA_SEED],
-        bump,
-        address = derive_sign_pda!(),
-    )]
-    pub sign_pda_account: Account<'info, SignerAccount>,
-    #[account(
-        address = derive_mxe_pda!()
-    )]
-    pub mxe_account: Account<'info, MXEAccount>,
-    #[account(
-        mut,
-        address = derive_mempool_pda!()
-    )]
-    /// CHECK: mempool_account, checked by the arcium program.
-    pub mempool_account: UncheckedAccount<'info>,
-    #[account(
-        mut,
-        address = derive_execpool_pda!()
-    )]
-    /// CHECK: executing_pool, checked by the arcium program.
-    pub executing_pool: UncheckedAccount<'info>,
-    #[account(
-        mut,
-        address = derive_comp_pda!(computation_offset)
-    )]
-    /// CHECK: computation_account, checked by the arcium program.
-    pub computation_account: UncheckedAccount<'info>,
-    #[account(
-        address = derive_comp_def_pda!(COMP_DEF_OFFSET_SETTLE_MATCH)
+        address = derive_comp_def_pda!(COMP_DEF_OFFSET_SETTLE_WITH_PROOF)
     )]
     pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
     #[account(
@@ -1458,38 +1236,12 @@ pub struct SubmitOrderCallback<'info> {
     pub instructions_sysvar: AccountInfo<'info>,
 }
 
-#[callback_accounts("match_orders")]
+#[callback_accounts("settle_with_proof")]
 #[derive(Accounts)]
-pub struct MatchOrdersCallback<'info> {
+pub struct SettleWithProofCallback<'info> {
     pub arcium_program: Program<'info, Arcium>,
     #[account(
-        address = derive_comp_def_pda!(COMP_DEF_OFFSET_MATCH_ORDERS)
-    )]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
-    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
-    /// CHECK: instructions_sysvar, checked by the account constraint
-    pub instructions_sysvar: AccountInfo<'info>,
-}
-
-#[callback_accounts("cancel_order")]
-#[derive(Accounts)]
-pub struct CancelOrderCallback<'info> {
-    pub arcium_program: Program<'info, Arcium>,
-    #[account(
-        address = derive_comp_def_pda!(COMP_DEF_OFFSET_CANCEL_ORDER)
-    )]
-    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
-    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
-    /// CHECK: instructions_sysvar, checked by the account constraint
-    pub instructions_sysvar: AccountInfo<'info>,
-}
-
-#[callback_accounts("settle_match")]
-#[derive(Accounts)]
-pub struct SettleMatchCallback<'info> {
-    pub arcium_program: Program<'info, Arcium>,
-    #[account(
-        address = derive_comp_def_pda!(COMP_DEF_OFFSET_SETTLE_MATCH)
+        address = derive_comp_def_pda!(COMP_DEF_OFFSET_SETTLE_WITH_PROOF)
     )]
     pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
     #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
@@ -1661,45 +1413,9 @@ pub struct InitSubmitOrderCompDef<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[init_computation_definition_accounts("match_orders", payer)]
+#[init_computation_definition_accounts("settle_with_proof", payer)]
 #[derive(Accounts)]
-pub struct InitMatchOrdersCompDef<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    #[account(
-        mut,
-        address = derive_mxe_pda!()
-    )]
-    pub mxe_account: Box<Account<'info, MXEAccount>>,
-    #[account(mut)]
-    /// CHECK: comp_def_account, checked by arcium program.
-    /// Can't check it here as it's not initialized yet.
-    pub comp_def_account: UncheckedAccount<'info>,
-    pub arcium_program: Program<'info, Arcium>,
-    pub system_program: Program<'info, System>,
-}
-
-#[init_computation_definition_accounts("cancel_order", payer)]
-#[derive(Accounts)]
-pub struct InitCancelOrderCompDef<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    #[account(
-        mut,
-        address = derive_mxe_pda!()
-    )]
-    pub mxe_account: Box<Account<'info, MXEAccount>>,
-    #[account(mut)]
-    /// CHECK: comp_def_account, checked by arcium program.
-    /// Can't check it here as it's not initialized yet.
-    pub comp_def_account: UncheckedAccount<'info>,
-    pub arcium_program: Program<'info, Arcium>,
-    pub system_program: Program<'info, System>,
-}
-
-#[init_computation_definition_accounts("settle_match", payer)]
-#[derive(Accounts)]
-pub struct InitSettleMatchCompDef<'info> {
+pub struct InitSettleWithProofCompDef<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
     #[account(
@@ -1772,19 +1488,7 @@ pub struct SubmitOrderEvent {
 }
 
 #[event]
-pub struct MatchOrdersEvent {
-    pub ciphertexts: Vec<[u8; 32]>,
-    pub nonce: [u8; 16],
-}
-
-#[event]
-pub struct CancelOrderEvent {
-    pub cancelled_order_id: [u8; 32],
-    pub nonce: [u8; 16],
-}
-
-#[event]
-pub struct SettleMatchEvent {
+pub struct SettleWithProofEvent {
     pub ciphertexts: [[u8; 32]; 13],
     pub nonce: [u8; 16],
 }
@@ -1796,4 +1500,6 @@ pub enum ErrorCode {
     AbortedComputation,
     #[msg("Cluster not set")]
     ClusterNotSet,
+    #[msg("Too many deposit proofs supplied")]
+    TooManyDepositProofs,
 }

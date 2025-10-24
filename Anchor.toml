@@ -17,7 +17,12 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [test]
-startup_wait = 10000
+startup_wait = 30000
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 \"tests/**/*.ts\""
+
+[test.validator]
+[[test.genesis]]
+address = "BKck65TgoKRokMjQM3datB9oRwJ8rAj2jxPXvHXUvcL6"
+program = "/mnt/c/Users/sonis/earn/confidential-cross-chain-exchange/artifacts/arcium_program_0.3.0.so"
