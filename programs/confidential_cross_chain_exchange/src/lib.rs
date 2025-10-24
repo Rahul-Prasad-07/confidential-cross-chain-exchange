@@ -323,11 +323,11 @@ pub mod confidential_cross_chain_exchange {
     pub fn match_orders(
         ctx: Context<MatchOrders>,
         computation_offset: u64,
-        ciphertext_order_ids: [[u8; 32]; 2],
-        ciphertext_sides: [[u8; 32]; 2],
-        ciphertext_prices: [[u8; 32]; 2],
-        ciphertext_sizes: [[u8; 32]; 2],
-        ciphertext_expiries: [[u8; 32]; 2],
+        ciphertext_order_ids: Vec<[u8; 32]>,
+        ciphertext_sides: Vec<[u8; 32]>,
+        ciphertext_prices: Vec<[u8; 32]>,
+        ciphertext_sizes: Vec<[u8; 32]>,
+        ciphertext_expiries: Vec<[u8; 32]>,
         n_orders: u8,
         pub_key: [u8; 32],
         nonce: u128,
@@ -338,7 +338,7 @@ pub mod confidential_cross_chain_exchange {
             Argument::PlaintextU128(nonce),
             Argument::PlaintextU8(n_orders),
         ];
-        for i in 0..2 {
+        for i in 0..ciphertext_order_ids.len() {
             args.push(Argument::EncryptedU64(ciphertext_order_ids[i]));
             args.push(Argument::EncryptedU8(ciphertext_sides[i]));
             args.push(Argument::EncryptedU64(ciphertext_prices[i]));
@@ -391,7 +391,7 @@ pub mod confidential_cross_chain_exchange {
         ciphertext_sell_order_id: [u8; 32],
         ciphertext_matched_price: [u8; 32],
         ciphertext_matched_size: [u8; 32],
-        ciphertext_deposit_proofs: [[u8; 32]; 4],
+        ciphertext_deposit_proofs: Vec<[u8; 32]>,
         n_deposit_proofs: u8,
         pub_key: [u8; 32],
         nonce: u128,
@@ -406,7 +406,7 @@ pub mod confidential_cross_chain_exchange {
             Argument::EncryptedU64(ciphertext_matched_size),
             Argument::PlaintextU8(n_deposit_proofs),
         ];
-        for i in 0..4 {
+        for i in 0..ciphertext_deposit_proofs.len() {
             args.push(Argument::EncryptedU64(ciphertext_deposit_proofs[i]));
         }
 

@@ -12,7 +12,8 @@
     "@coral-xyz/anchor": "^0.31.1",
     "@arcium-hq/client": "^0.3.0",
     "@solana/web3.js": "^1.95.3",
-    "crypto": "^1.0.1"
+    "crypto": "^1.0.1",
+    "dotenv": "^16.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
