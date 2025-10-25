@@ -18,11 +18,11 @@ mod circuits {
 
     // === New encrypted instructions ===
     pub struct RelayOfferInput {
-        offer_id: u64,
+        external_seller_identity_hash: u64,
     }
 
     pub struct RelayOfferOutput {
-        cloned_offer: u64,
+        ack: u64,
     }
 
     #[instruction]
@@ -30,10 +30,10 @@ mod circuits {
         input_ctxt: Enc<Shared, RelayOfferInput>,
     ) -> Enc<Shared, RelayOfferOutput> {
         let input = input_ctxt.to_arcis();
-        let cloned_offer = input.offer_id;
+        let ack = input.external_seller_identity_hash;
         input_ctxt
             .owner
-            .from_arcis(RelayOfferOutput { cloned_offer })
+            .from_arcis(RelayOfferOutput { ack })
     }
 
     pub struct DepositInput {
@@ -56,13 +56,11 @@ mod circuits {
     }
 
     pub struct DepositSplInput {
-        offer_id: u64,
-        amount: u64,
+        seller_identity_hash: u64,
     }
 
     pub struct DepositSplOutput {
-        processed_offer_id: u64,
-        processed_amount: u64,
+        ack: u64,
     }
 
     #[instruction]
@@ -70,21 +68,18 @@ mod circuits {
         input_ctxt: Enc<Shared, DepositSplInput>,
     ) -> Enc<Shared, DepositSplOutput> {
         let input = input_ctxt.to_arcis();
-        let processed_offer_id = input.offer_id;
-        let processed_amount = input.amount;
+        let ack = input.seller_identity_hash;
         input_ctxt
             .owner
-            .from_arcis(DepositSplOutput { processed_offer_id, processed_amount })
+            .from_arcis(DepositSplOutput { ack })
     }
 
     pub struct DepositSellerNativeInput {
-        offer_id: u64,
-        amount: u64,
+        seller_identity_hash: u64,
     }
 
     pub struct DepositSellerNativeOutput {
-        processed_offer_id: u64,
-        processed_amount: u64,
+        ack: u64,
     }
 
     #[instruction]
@@ -92,21 +87,18 @@ mod circuits {
         input_ctxt: Enc<Shared, DepositSellerNativeInput>,
     ) -> Enc<Shared, DepositSellerNativeOutput> {
         let input = input_ctxt.to_arcis();
-        let processed_offer_id = input.offer_id;
-        let processed_amount = input.amount;
+        let ack = input.seller_identity_hash;
         input_ctxt
             .owner
-            .from_arcis(DepositSellerNativeOutput { processed_offer_id, processed_amount })
+            .from_arcis(DepositSellerNativeOutput { ack })
     }
 
     pub struct DepositSellerSPLInput {
-        offer_id: u64,
-        amount: u64,
+        seller_identity_hash: u64,
     }
 
     pub struct DepositSellerSPLOutput {
-        processed_offer_id: u64,
-        processed_amount: u64,
+        ack: u64,
     }
 
     #[instruction]
@@ -114,19 +106,18 @@ mod circuits {
         input_ctxt: Enc<Shared, DepositSellerSPLInput>,
     ) -> Enc<Shared, DepositSellerSPLOutput> {
         let input = input_ctxt.to_arcis();
-        let processed_offer_id = input.offer_id;
-        let processed_amount = input.amount;
+        let ack = input.seller_identity_hash;
         input_ctxt
             .owner
-            .from_arcis(DepositSellerSPLOutput { processed_offer_id, processed_amount })
+            .from_arcis(DepositSellerSPLOutput { ack })
     }
 
     pub struct FinalizeInterchainInput {
-        offer_id: u64,
+        buyer_identity_hash: u64,
     }
 
     pub struct FinalizeInterchainOutput {
-        finalized_offer_id: u64,
+        ack: u64,
     }
 
     #[instruction]
@@ -134,18 +125,18 @@ mod circuits {
         input_ctxt: Enc<Shared, FinalizeInterchainInput>,
     ) -> Enc<Shared, FinalizeInterchainOutput> {
         let input = input_ctxt.to_arcis();
-        let finalized_offer_id = input.offer_id;
+        let ack = input.buyer_identity_hash;
         input_ctxt
             .owner
-            .from_arcis(FinalizeInterchainOutput { finalized_offer_id })
+            .from_arcis(FinalizeInterchainOutput { ack })
     }
 
     pub struct FinalizeIntrachainInput {
-        offer_id: u64,
+        buyer_identity_hash: u64,
     }
 
     pub struct FinalizeIntrachainOutput {
-        finalized_offer_id: u64,
+        ack: u64,
     }
 
     #[instruction]
@@ -153,9 +144,9 @@ mod circuits {
         input_ctxt: Enc<Shared, FinalizeIntrachainInput>,
     ) -> Enc<Shared, FinalizeIntrachainOutput> {
         let input = input_ctxt.to_arcis();
-        let finalized_offer_id = input.offer_id;
+        let ack = input.buyer_identity_hash;
         input_ctxt
             .owner
-            .from_arcis(FinalizeIntrachainOutput { finalized_offer_id })
+            .from_arcis(FinalizeIntrachainOutput { ack })
     }
 }

@@ -79,19 +79,45 @@ pub mod confidential_cross_chain_exchange {
         Ok(())
     }
 
+    pub fn init_finalize_intrachain_offer_comp_def(ctx: Context<InitFinalizeIntrachainOfferCompDef>) -> Result<()> {
+        init_comp_def(ctx.accounts, true, 0, None, None)?;
+        Ok(())
+    }
+
 
     pub fn relay_offer_clone(
         ctx: Context<RelayOfferClone>,
-        computation_offset: u64,
-        ciphertext_offer_id: [u8; 32],
+        // Public business fields (matching original program)
+        id: u64,
+        token_b_wanted_amount: u64,
+        token_a_offered_amount: u64,
+        is_taker_native: bool,
+        chain_id: u64,
+        deadline: i64,
+        // Confidential identity
+        ciphertext_external_seller_identity_hash: [u8; 32],
+        // Arcium handshake
         pub_key: [u8; 32],
         nonce: u128,
+        computation_offset: u64,
     ) -> Result<()> {
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+        
+        // Store public metadata in PDA
+        let offer = &mut ctx.accounts.interchain_offer;
+        offer.id = id;
+        offer.token_a_offered_amount = token_a_offered_amount;
+        offer.token_b_wanted_amount = token_b_wanted_amount;
+        offer.is_taker_native = is_taker_native;
+        offer.chain_id = chain_id;
+        offer.deadline = deadline;
+        offer.bump = ctx.bumps.interchain_offer;
+
+        // Only pass encrypted inputs expected by the circuit (handshake + encrypted identity)
         let args = vec![
             Argument::ArcisPubkey(pub_key),
             Argument::PlaintextU128(nonce),
-            Argument::EncryptedU64(ciphertext_offer_id),
+            Argument::EncryptedU64(ciphertext_external_seller_identity_hash),
         ];
 
         queue_computation(
@@ -132,20 +158,37 @@ pub mod confidential_cross_chain_exchange {
 
     pub fn interchain_origin_evm_deposit_seller_spl(
         ctx: Context<InterchainOriginEvmDepositSellerSpl>,
-        computation_offset: u64,
-        ciphertext_offer_id: [u8; 32],
-        ciphertext_amount: [u8; 32],
+        // Public business fields
+        id: u64,
+        token_b_wanted_amount: u64,
+        token_a_offered_amount: u64,
+        is_taker_native: bool,
+        chain_id: u64,
+        deadline: i64,
+        // Confidential identity
+        ciphertext_seller_identity_hash: [u8; 32],
+        // Arcium handshake
         pub_key: [u8; 32],
         nonce: u128,
-        is_taker_native: bool,
+        computation_offset: u64,
     ) -> Result<()> {
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+        
+        // Store public metadata in PDA
+        let offer = &mut ctx.accounts.interchain_offer;
+        offer.id = id;
+        offer.token_a_offered_amount = token_a_offered_amount;
+        offer.token_b_wanted_amount = token_b_wanted_amount;
+        offer.is_taker_native = is_taker_native;
+        offer.chain_id = chain_id;
+        offer.deadline = deadline;
+        offer.bump = ctx.bumps.interchain_offer;
+
+        // Only pass encrypted inputs expected by the circuit
         let args = vec![
             Argument::ArcisPubkey(pub_key),
             Argument::PlaintextU128(nonce),
-            Argument::EncryptedU64(ciphertext_offer_id),
-            Argument::EncryptedU64(ciphertext_amount),
-            Argument::PlaintextBool(is_taker_native),
+            Argument::EncryptedU64(ciphertext_seller_identity_hash),
         ];
 
         queue_computation(
@@ -161,16 +204,21 @@ pub mod confidential_cross_chain_exchange {
 
     pub fn finalize_interchain_origin_evm_offer(
         ctx: Context<FinalizeInterchainOriginEvmOffer>,
-        computation_offset: u64,
-        ciphertext_offer_id: [u8; 32],
+        // Public business field
+        id: u64,
+        // Confidential buyer identity
+        ciphertext_buyer_identity_hash: [u8; 32],
+        // Arcium handshake
         pub_key: [u8; 32],
         nonce: u128,
+        computation_offset: u64,
     ) -> Result<()> {
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+        // Circuit expects only encrypted buyer identity (plus handshake)
         let args = vec![
             Argument::ArcisPubkey(pub_key),
             Argument::PlaintextU128(nonce),
-            Argument::EncryptedU64(ciphertext_offer_id),
+            Argument::EncryptedU64(ciphertext_buyer_identity_hash),
         ];
 
         queue_computation(
@@ -186,18 +234,35 @@ pub mod confidential_cross_chain_exchange {
 
     pub fn deposit_seller_native(
         ctx: Context<DepositSellerNative>,
-        computation_offset: u64,
-        ciphertext_offer_id: [u8; 32],
-        ciphertext_amount: [u8; 32],
+        // Public business fields (matching original program)
+        id: u64,
+        token_b_wanted_amount: u64,
+        token_a_offered_amount: u64,
+        is_taker_native: bool,
+        deadline: i64,
+        // Confidential identity
+        ciphertext_seller_identity_hash: [u8; 32],
+        // Arcium handshake
         pub_key: [u8; 32],
         nonce: u128,
+        computation_offset: u64,
     ) -> Result<()> {
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+        
+        // Store public metadata in PDA
+        let offer = &mut ctx.accounts.intrachain_offer;
+        offer.id = id;
+        offer.token_a_offered_amount = token_a_offered_amount;
+        offer.token_b_wanted_amount = token_b_wanted_amount;
+        offer.is_taker_native = is_taker_native;
+        offer.deadline = deadline;
+        offer.bump = ctx.bumps.intrachain_offer;
+
+        // Only pass encrypted inputs expected by the circuit
         let args = vec![
             Argument::ArcisPubkey(pub_key),
             Argument::PlaintextU128(nonce),
-            Argument::EncryptedU64(ciphertext_offer_id),
-            Argument::EncryptedU64(ciphertext_amount),
+            Argument::EncryptedU64(ciphertext_seller_identity_hash),
         ];
 
         queue_computation(
@@ -213,18 +278,35 @@ pub mod confidential_cross_chain_exchange {
 
     pub fn deposit_seller_spl(
         ctx: Context<DepositSellerSpl>,
-        computation_offset: u64,
-        ciphertext_offer_id: [u8; 32],
-        ciphertext_amount: [u8; 32],
+        // Public business fields (matching original program)
+        id: u64,
+        token_b_wanted_amount: u64,
+        token_a_offered_amount: u64,
+        is_taker_native: bool,
+        deadline: i64,
+        // Confidential identity
+        ciphertext_seller_identity_hash: [u8; 32],
+        // Arcium handshake
         pub_key: [u8; 32],
         nonce: u128,
+        computation_offset: u64,
     ) -> Result<()> {
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+        
+        // Store public metadata in PDA
+        let offer = &mut ctx.accounts.intrachain_offer;
+        offer.id = id;
+        offer.token_a_offered_amount = token_a_offered_amount;
+        offer.token_b_wanted_amount = token_b_wanted_amount;
+        offer.is_taker_native = is_taker_native;
+        offer.deadline = deadline;
+        offer.bump = ctx.bumps.intrachain_offer;
+
+        // Only pass encrypted inputs expected by the circuit
         let args = vec![
             Argument::ArcisPubkey(pub_key),
             Argument::PlaintextU128(nonce),
-            Argument::EncryptedU64(ciphertext_offer_id),
-            Argument::EncryptedU64(ciphertext_amount),
+            Argument::EncryptedU64(ciphertext_seller_identity_hash),
         ];
 
         queue_computation(
@@ -240,16 +322,21 @@ pub mod confidential_cross_chain_exchange {
 
     pub fn finalize_intrachain_offer(
         ctx: Context<FinalizeIntrachainOffer>,
-        computation_offset: u64,
-        ciphertext_offer_id: [u8; 32],
+        // Public business field
+        id: u64,
+        // Confidential buyer identity
+        ciphertext_buyer_identity_hash: [u8; 32],
+        // Arcium handshake
         pub_key: [u8; 32],
         nonce: u128,
+        computation_offset: u64,
     ) -> Result<()> {
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+        // Circuit expects only encrypted buyer identity (plus handshake)
         let args = vec![
             Argument::ArcisPubkey(pub_key),
             Argument::PlaintextU128(nonce),
-            Argument::EncryptedU64(ciphertext_offer_id),
+            Argument::EncryptedU64(ciphertext_buyer_identity_hash),
         ];
 
         queue_computation(
@@ -281,19 +368,20 @@ pub mod confidential_cross_chain_exchange {
         Ok(())
     }
 
-        #[arcium_callback(encrypted_ix = "relay_offer_clone")]
+    #[arcium_callback(encrypted_ix = "relay_offer_clone")]
     pub fn relay_offer_clone_callback(
         ctx: Context<RelayOfferCloneCallback>,
         output: ComputationOutputs<RelayOfferCloneOutput>,
     ) -> Result<()> {
-        let o = match output {
+        let _o = match output {
             ComputationOutputs::Success(RelayOfferCloneOutput { field_0 }) => field_0,
             _ => return Err(ErrorCode::AbortedComputation.into()),
         };
 
+        // Public data already stored in PDA during relay_offer_clone call
+        // Just emit acknowledgment
         emit!(RelayOfferClonedEvent {
-            cloned_offer: o.ciphertexts[0],
-            nonce: o.nonce.to_le_bytes(),
+            acknowledged: 1,
         });
         Ok(())
     }
@@ -320,15 +408,14 @@ pub mod confidential_cross_chain_exchange {
         ctx: Context<InterchainOriginEvmDepositSellerSplCallback>,
         output: ComputationOutputs<InterchainOriginEvmDepositSellerSplOutput>,
     ) -> Result<()> {
-        let o = match output {
+        let _o = match output {
             ComputationOutputs::Success(InterchainOriginEvmDepositSellerSplOutput { field_0 }) => field_0,
             _ => return Err(ErrorCode::AbortedComputation.into()),
         };
 
+        // Public data already stored in PDA during interchain_origin_evm_deposit_seller_spl call
         emit!(InterchainOriginEvmDepositSellerSplEvent {
-            processed_offer_id: o.ciphertexts[0],
-            processed_amount: o.ciphertexts[1],
-            nonce: o.nonce.to_le_bytes(),
+            acknowledged: 1,
         });
         Ok(())
     }
@@ -338,14 +425,13 @@ pub mod confidential_cross_chain_exchange {
         ctx: Context<FinalizeInterchainOriginEvmOfferCallback>,
         output: ComputationOutputs<FinalizeInterchainOriginEvmOfferOutput>,
     ) -> Result<()> {
-        let o = match output {
+        let _o = match output {
             ComputationOutputs::Success(FinalizeInterchainOriginEvmOfferOutput { field_0 }) => field_0,
             _ => return Err(ErrorCode::AbortedComputation.into()),
         };
 
         emit!(FinalizeInterchainOriginEvmOfferEvent {
-            finalized_offer_id: o.ciphertexts[0],
-            nonce: o.nonce.to_le_bytes(),
+            acknowledged: 1,
         });
         Ok(())
     }
@@ -355,15 +441,14 @@ pub mod confidential_cross_chain_exchange {
         ctx: Context<DepositSellerNativeCallback>,
         output: ComputationOutputs<DepositSellerNativeOutput>,
     ) -> Result<()> {
-        let o = match output {
+        let _o = match output {
             ComputationOutputs::Success(DepositSellerNativeOutput { field_0 }) => field_0,
             _ => return Err(ErrorCode::AbortedComputation.into()),
         };
 
+        // Public data already stored in PDA during deposit_seller_native call
         emit!(DepositSellerNativeEvent {
-            processed_offer_id: o.ciphertexts[0],
-            processed_amount: o.ciphertexts[1],
-            nonce: o.nonce.to_le_bytes(),
+            acknowledged: 1,
         });
         Ok(())
     }
@@ -373,32 +458,30 @@ pub mod confidential_cross_chain_exchange {
         ctx: Context<DepositSellerSplCallback>,
         output: ComputationOutputs<DepositSellerSplOutput>,
     ) -> Result<()> {
-        let o = match output {
+        let _o = match output {
             ComputationOutputs::Success(DepositSellerSplOutput { field_0 }) => field_0,
             _ => return Err(ErrorCode::AbortedComputation.into()),
         };
 
+        // Public data already stored in PDA during deposit_seller_spl call
         emit!(DepositSellerSplEvent {
-            processed_offer_id: o.ciphertexts[0],
-            processed_amount: o.ciphertexts[1],
-            nonce: o.nonce.to_le_bytes(),
+            acknowledged: 1,
         });
         Ok(())
     }
 
     #[arcium_callback(encrypted_ix = "finalize_intrachain_offer")]
     pub fn finalize_intrachain_offer_callback(
-        ctx: Context<FinalizeIntrachainOfferCallback>,
+            ctx: Context<FinalizeIntrachainOfferCallback>,
         output: ComputationOutputs<FinalizeIntrachainOfferOutput>,
     ) -> Result<()> {
-        let o = match output {
+            let _o = match output {
             ComputationOutputs::Success(FinalizeIntrachainOfferOutput { field_0 }) => field_0,
             _ => return Err(ErrorCode::AbortedComputation.into()),
         };
 
         emit!(FinalizeIntrachainOfferEvent {
-            finalized_offer_id: o.ciphertexts[0],
-            nonce: o.nonce.to_le_bytes(),
+                acknowledged: 1,
         });
         Ok(())
     }
@@ -466,10 +549,18 @@ pub struct AddTogether<'info> {
 
 #[queue_computation_accounts("relay_offer_clone", payer)]
 #[derive(Accounts)]
-#[instruction(computation_offset: u64)]
+#[instruction(id: u64, token_b_wanted_amount: u64, token_a_offered_amount: u64, is_taker_native: bool, chain_id: u64, deadline: i64, ciphertext_external_seller_identity_hash: [u8; 32], pub_key: [u8; 32], nonce: u128, computation_offset: u64)]
 pub struct RelayOfferClone<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + 8 + 8 + 8 + 1 + 8 + 8 + 1,
+        seeds = [b"InterChainoffer", payer.key().as_ref(), &id.to_le_bytes()],
+        bump
+    )]
+    pub interchain_offer: Account<'info, InterchainOffer>,
     #[account(
         init_if_needed,
         space = 9,
@@ -584,10 +675,18 @@ pub struct ConfidentialDepositNative<'info> {
 
 #[queue_computation_accounts("interchain_origin_evm_deposit_seller_spl", payer)]
 #[derive(Accounts)]
-#[instruction(computation_offset: u64)]
+#[instruction(id: u64, token_b_wanted_amount: u64, token_a_offered_amount: u64, is_taker_native: bool, chain_id: u64, deadline: i64, ciphertext_seller_identity_hash: [u8; 32], pub_key: [u8; 32], nonce: u128, computation_offset: u64)]
 pub struct InterchainOriginEvmDepositSellerSpl<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + 8 + 8 + 8 + 1 + 8 + 8 + 1,
+        seeds = [b"InterChainoffer", payer.key().as_ref(), &id.to_le_bytes()],
+        bump
+    )]
+    pub interchain_offer: Account<'info, InterchainOffer>,
     #[account(
         init_if_needed,
         space = 9,
@@ -702,10 +801,18 @@ pub struct FinalizeInterchainOriginEvmOffer<'info> {
 
 #[queue_computation_accounts("deposit_seller_native", payer)]
 #[derive(Accounts)]
-#[instruction(computation_offset: u64)]
+#[instruction(id: u64, token_b_wanted_amount: u64, token_a_offered_amount: u64, is_taker_native: bool, deadline: i64, ciphertext_seller_identity_hash: [u8; 32], pub_key: [u8; 32], nonce: u128, computation_offset: u64)]
 pub struct DepositSellerNative<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + 8 + 8 + 8 + 1 + 8 + 1,
+        seeds = [b"IntraChainoffer", payer.key().as_ref(), &id.to_le_bytes()],
+        bump
+    )]
+    pub intrachain_offer: Account<'info, IntraChainOffer>,
     #[account(
         init_if_needed,
         space = 9,
@@ -761,10 +868,18 @@ pub struct DepositSellerNative<'info> {
 
 #[queue_computation_accounts("deposit_seller_spl", payer)]
 #[derive(Accounts)]
-#[instruction(computation_offset: u64)]
+#[instruction(id: u64, token_b_wanted_amount: u64, token_a_offered_amount: u64, is_taker_native: bool, deadline: i64, ciphertext_seller_identity_hash: [u8; 32], pub_key: [u8; 32], nonce: u128, computation_offset: u64)]
 pub struct DepositSellerSpl<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + 8 + 8 + 8 + 1 + 8 + 1,
+        seeds = [b"IntraChainoffer", payer.key().as_ref(), &id.to_le_bytes()],
+        bump
+    )]
+    pub intrachain_offer: Account<'info, IntraChainOffer>,
     #[account(
         init_if_needed,
         space = 9,
@@ -1138,8 +1253,7 @@ pub struct SumEvent {
 
 #[event]
 pub struct RelayOfferClonedEvent {
-    pub cloned_offer: [u8; 32],
-    pub nonce: [u8; 16],
+    pub acknowledged: u8,
 }
 
 #[event]
@@ -1150,35 +1264,27 @@ pub struct ConfidentialDepositNativeEvent {
 
 #[event]
 pub struct InterchainOriginEvmDepositSellerSplEvent {
-    pub processed_offer_id: [u8; 32],
-    pub processed_amount: [u8; 32],
-    pub nonce: [u8; 16],
+    pub acknowledged: u8,
 }
 
 #[event]
 pub struct FinalizeInterchainOriginEvmOfferEvent {
-    pub finalized_offer_id: [u8; 32],
-    pub nonce: [u8; 16],
+    pub acknowledged: u8,
 }
 
 #[event]
 pub struct DepositSellerNativeEvent {
-    pub processed_offer_id: [u8; 32],
-    pub processed_amount: [u8; 32],
-    pub nonce: [u8; 16],
+    pub acknowledged: u8,
 }
 
 #[event]
 pub struct DepositSellerSplEvent {
-    pub processed_offer_id: [u8; 32],
-    pub processed_amount: [u8; 32],
-    pub nonce: [u8; 16],
+    pub acknowledged: u8,
 }
 
 #[event]
 pub struct FinalizeIntrachainOfferEvent {
-    pub finalized_offer_id: [u8; 32],
-    pub nonce: [u8; 16],
+    pub acknowledged: u8,
 }
 
 
@@ -1188,4 +1294,26 @@ pub enum ErrorCode {
     AbortedComputation,
     #[msg("Cluster not set")]
     ClusterNotSet,
+}
+
+// PDA account structures for on-chain state (matching original Anchor program)
+#[account]
+pub struct IntraChainOffer {
+    pub id: u64,
+    pub token_a_offered_amount: u64,
+    pub token_b_wanted_amount: u64,
+    pub is_taker_native: bool,
+    pub deadline: i64,
+    pub bump: u8,
+}
+
+#[account]
+pub struct InterchainOffer {
+    pub id: u64,
+    pub token_a_offered_amount: u64,
+    pub token_b_wanted_amount: u64,
+    pub is_taker_native: bool,
+    pub chain_id: u64,
+    pub deadline: i64,
+    pub bump: u8,
 }
