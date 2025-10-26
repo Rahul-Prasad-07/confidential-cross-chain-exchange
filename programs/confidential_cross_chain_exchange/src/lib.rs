@@ -742,7 +742,7 @@ pub struct InterchainOriginEvmDepositSellerSpl<'info> {
 
 #[queue_computation_accounts("finalize_interchain_origin_evm_offer", payer)]
 #[derive(Accounts)]
-#[instruction(computation_offset: u64)]
+#[instruction(id: u64, ciphertext_buyer_identity_hash: [u8; 32], pub_key: [u8; 32], nonce: u128, computation_offset: u64)]
 pub struct FinalizeInterchainOriginEvmOffer<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -935,7 +935,7 @@ pub struct DepositSellerSpl<'info> {
 
 #[queue_computation_accounts("finalize_intrachain_offer", payer)]
 #[derive(Accounts)]
-#[instruction(computation_offset: u64)]
+#[instruction(id: u64, ciphertext_buyer_identity_hash: [u8; 32], pub_key: [u8; 32], nonce: u128, computation_offset: u64)]
 pub struct FinalizeIntrachainOffer<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,

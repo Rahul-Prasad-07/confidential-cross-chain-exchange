@@ -531,8 +531,8 @@ describe("ConfidentialCrossChainExchange", () => {
         new anchor.BN(deserializeLE(nonce).toString()),
         computationOffset
       )
-      .accounts({
-        payer: (provider.wallet as any).payer.publicKey,
+      .accountsPartial({
+        payer: provider.wallet.publicKey,
         signPdaAccount: getSignPdaAccAddress(program.programId),
         computationAccount: getComputationAccAddress(
           program.programId,
@@ -546,7 +546,7 @@ describe("ConfidentialCrossChainExchange", () => {
           program.programId,
           Buffer.from(getCompDefAccOffset("finalize_interchain_origin_evm_offer")).readUInt32LE()
         ),
-      } as any)
+      })
       .rpc({ skipPreflight: true, commitment: "confirmed" });
     console.log("Queue sig is ", queueSig);
 
@@ -809,8 +809,8 @@ describe("ConfidentialCrossChainExchange", () => {
         new anchor.BN(deserializeLE(nonce).toString()),
         computationOffset
       )
-      .accounts({
-        payer: (provider.wallet as any).payer.publicKey,
+      .accountsPartial({
+        payer: provider.wallet.publicKey,
         signPdaAccount: getSignPdaAccAddress(program.programId),
         computationAccount: getComputationAccAddress(
           program.programId,
@@ -824,7 +824,7 @@ describe("ConfidentialCrossChainExchange", () => {
           program.programId,
           Buffer.from(getCompDefAccOffset("finalize_intrachain_offer")).readUInt32LE()
         ),
-      } as any)
+      })
       .rpc({ skipPreflight: true, commitment: "confirmed" });
     console.log("Queue sig is ", queueSig);
 
