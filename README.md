@@ -11,3 +11,15 @@ A privacy-preserving, non-custodial exchange enabling secure, cross-chain peer-t
 ---
 
 <h2 align="center">Development Progress & Roadmap</h2>
+
+<br><br>  <!-- adds vertical space -->
+
+- Backend and AMM bot is developed for standalone EVM <-> SOLANA 
+- Backend and AMM bot is under development for confidential cross chain p2p exchange
+
+<br><br>  <!-- adds vertical space -->
+
+
+<img width="1610" height="622" alt="image" src="https://github.com/user-attachments/assets/25b07c3c-81c9-4176-80d9-5b1591e9566f" />
+
+
