@@ -6,7 +6,7 @@ A privacy-preserving, non-custodial exchange enabling secure, cross-chain peer-t
 
 
 
-<img width="2308" height="1260" alt="image" src="https://github.com/user-attachments/assets/decdf2fb-3066-489b-a110-79a352253894" />
+<img width="2386" height="1686" alt="image" src="https://github.com/user-attachments/assets/f4360f4b-0287-4f74-91fc-a4ddcb01e366" />
 
 ---
 
