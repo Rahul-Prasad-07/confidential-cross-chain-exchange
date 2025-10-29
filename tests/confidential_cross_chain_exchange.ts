@@ -841,6 +841,286 @@ describe("ConfidentialCrossChainExchange", () => {
     expect(finalizeEvent.acknowledged).to.equal(1);
   });
 
+  it("Complete intrachain swap with escrow & asset transfers works!", async () => {
+    console.log("\n╔══════════════════════════════════════════════════════════════╗");
+    console.log("║  CONFIDENTIAL P2P EXCHANGE - COMPLETE SWAP FLOW              ║");
+    console.log("╚══════════════════════════════════════════════════════════════╝\n");
+
+    // Test users
+    const seller = (provider.wallet as any).payer;
+    const buyer = anchor.web3.Keypair.generate();
+
+    // Airdrop to buyer for testing
+    const airdropSig = await provider.connection.requestAirdrop(
+      buyer.publicKey,
+      20 * anchor.web3.LAMPORTS_PER_SOL
+    );
+    // Confirm the airdrop using an explicit commitment to avoid relying on an expired blockhash
+    await provider.connection.confirmTransaction(airdropSig, "confirmed");
+
+    // 1. SETUP: Generate encrypted identities
+    console.log("📝 STEP 1: Preparing encrypted identities...");
+
+    const sellerIdentity = "alice@ethereum.eth";
+    const buyerIdentity = "bob@ethereum.eth";
+
+    const sellerHashBuffer = createHash("sha256").update(sellerIdentity).digest();
+    const buyerHashBuffer = createHash("sha256").update(buyerIdentity).digest();
+
+    const sellerHashU64 = sellerHashBuffer.readBigUInt64LE();
+    const buyerHashU64 = buyerHashBuffer.readBigUInt64LE();
+
+    console.log(`  Seller: ${sellerIdentity} → hash: 0x${sellerHashBuffer.toString('hex').substring(0, 16)}`);
+    console.log(`  Buyer:  ${buyerIdentity} → hash: 0x${buyerHashBuffer.toString('hex').substring(0, 16)}\n`);
+
+    // Get MXE public key and setup encryption
+    const mxePublicKey = await getMXEPublicKeyWithRetry(
+      provider as anchor.AnchorProvider,
+      program.programId
+    );
+
+    const sellerPrivateKey = x25519.utils.randomSecretKey();
+    const sellerPublicKey = x25519.getPublicKey(sellerPrivateKey);
+    const sellerSharedSecret = x25519.getSharedSecret(sellerPrivateKey, mxePublicKey);
+    const sellerCipher = new RescueCipher(sellerSharedSecret);
+
+    const buyerPrivateKey = x25519.utils.randomSecretKey();
+    const buyerPublicKey = x25519.getPublicKey(buyerPrivateKey);
+    const buyerSharedSecret = x25519.getSharedSecret(buyerPrivateKey, mxePublicKey);
+    const buyerCipher = new RescueCipher(buyerSharedSecret);
+
+    // Encrypt identities
+    const sellerNonce = randomBytes(16);
+    const buyerNonce = randomBytes(16);
+    const sellerCiphertext = sellerCipher.encrypt([sellerHashU64], sellerNonce);
+    const buyerCiphertext = buyerCipher.encrypt([buyerHashU64], buyerNonce);
+
+    // 2. SELLER CREATES OFFER
+    console.log("💼 STEP 2: Seller creates offer...");
+
+    const offerId = new anchor.BN(99999);
+    const tokenAAmount = new anchor.BN(10 * anchor.web3.LAMPORTS_PER_SOL); // 10 SOL (token A)
+    const tokenBAmount = new anchor.BN(3 * anchor.web3.LAMPORTS_PER_SOL);  // 3 SOL (token B)
+
+    console.log(`  Offer ID: ${offerId.toString()}`);
+    console.log(`  Seller offers: ${tokenAAmount.toNumber() / anchor.web3.LAMPORTS_PER_SOL} SOL (token A)`);
+    console.log(`  Seller wants:  ${tokenBAmount.toNumber() / anchor.web3.LAMPORTS_PER_SOL} SOL (token B)\n`);
+
+    const intrachainOffer = deriveIntrachainOfferPda(
+      program.programId,
+      seller.publicKey,
+      offerId
+    );
+
+    const computationOffset = new anchor.BN(randomBytes(8), "hex");
+
+    // Initialize computation definition first (reuse existing from previous test)
+    const owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
+    // Note: deposit_seller_native comp def is already initialized in previous test
+
+    await program.methods
+      .depositSellerNative(
+        offerId,
+        tokenBAmount,
+        tokenAAmount,
+        true,
+        new anchor.BN(Math.floor(Date.now() / 1000) + 3600),
+        Array.from(sellerCiphertext[0]),
+        Array.from(sellerPublicKey),
+        new anchor.BN(deserializeLE(sellerNonce).toString()),
+        computationOffset
+      )
+      .accounts({
+        payer: seller.publicKey,
+        intrachainOffer,
+        signPdaAccount: getSignPdaAccAddress(program.programId),
+        computationAccount: getComputationAccAddress(
+          program.programId,
+          computationOffset
+        ),
+        clusterAccount: arciumEnv.arciumClusterPubkey,
+        mxeAccount: getMXEAccAddress(program.programId),
+        mempoolAccount: getMempoolAccAddress(program.programId),
+        executingPool: getExecutingPoolAccAddress(program.programId),
+        compDefAccount: getCompDefAccAddress(
+          program.programId,
+          Buffer.from(getCompDefAccOffset("deposit_seller_native")).readUInt32LE()
+        ),
+      } as any)
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+    await awaitComputationFinalization(
+      provider as anchor.AnchorProvider,
+      computationOffset,
+      program.programId,
+      "confirmed"
+    );
+    console.log("  ✅ Offer created & seller identity verified via MPC\n");
+
+    // 3. SELLER DEPOSITS TO ESCROW
+    console.log("🔒 STEP 3: Seller deposits token A to escrow vault...");
+
+    const sellerVault = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("seller_vault"),
+        seller.publicKey.toBuffer(),
+        offerId.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    )[0];
+
+    const sellerBalanceBefore = await provider.connection.getBalance(seller.publicKey);
+    console.log(`  Seller balance before: ${sellerBalanceBefore / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+
+    // Use Anchor RPC call with signer instead of manually composing/signing/sending the transaction.
+    // This avoids errors related to stale/expired blockhashes when sending raw transactions.
+    await program.methods
+      .depositToSellerVault(offerId, tokenAAmount)
+      .accountsPartial({
+        seller: seller.publicKey,
+        sellerVault: sellerVault,
+      })
+      .signers([seller])
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+    const sellerBalanceAfterDeposit = await provider.connection.getBalance(seller.publicKey);
+    const vaultBalanceAfterSeller = await provider.connection.getBalance(sellerVault);
+
+    console.log(`  Seller balance after:  ${sellerBalanceAfterDeposit / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+    console.log(`  Vault balance:         ${vaultBalanceAfterSeller / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+    console.log(`  ✅ Seller deposited ${tokenAAmount.toNumber() / anchor.web3.LAMPORTS_PER_SOL} SOL to escrow\n`);
+
+    // 4. BUYER FINALIZES OFFER
+    console.log("🤝 STEP 4: Buyer finalizes offer...");
+
+    const buyerComputationOffset = new anchor.BN(randomBytes(8), "hex");
+
+    // Initialize finalize computation definition (already done in previous test)
+    // await initFinalizeIntrachainOfferCompDef(program, owner, false, false);
+
+    await program.methods
+      .finalizeIntrachainOffer(
+        offerId,
+        Array.from(buyerCiphertext[0]),
+        Array.from(buyerPublicKey),
+        new anchor.BN(deserializeLE(buyerNonce).toString()),
+        buyerComputationOffset
+      )
+      .accountsPartial({
+        payer: buyer.publicKey,
+        signPdaAccount: getSignPdaAccAddress(program.programId),
+        computationAccount: getComputationAccAddress(
+          program.programId,
+          buyerComputationOffset
+        ),
+        clusterAccount: arciumEnv.arciumClusterPubkey,
+        mxeAccount: getMXEAccAddress(program.programId),
+        mempoolAccount: getMempoolAccAddress(program.programId),
+        executingPool: getExecutingPoolAccAddress(program.programId),
+        compDefAccount: getCompDefAccAddress(
+          program.programId,
+          Buffer.from(getCompDefAccOffset("finalize_intrachain_offer")).readUInt32LE()
+        ),
+      })
+      .signers([buyer])
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+    await awaitComputationFinalization(
+      provider as anchor.AnchorProvider,
+      buyerComputationOffset,
+      program.programId,
+      "confirmed"
+    );
+    console.log("  ✅ Buyer identity verified via MPC\n");
+
+    // 5. BUYER DEPOSITS TO ESCROW
+    console.log("🔒 STEP 5: Buyer deposits token B to escrow vault...");
+
+    const buyerVault = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("buyer_vault"),
+        buyer.publicKey.toBuffer(),
+        offerId.toArrayLike(Buffer, "le", 8),
+      ],
+      program.programId
+    )[0];
+
+    const buyerBalanceBefore = await provider.connection.getBalance(buyer.publicKey);
+    console.log(`  Buyer balance before:  ${buyerBalanceBefore / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+
+    // Use Anchor RPC call with signer for buyer deposit as well.
+    await program.methods
+      .depositToBuyerVault(offerId, tokenBAmount)
+      .accountsPartial({
+        buyer: buyer.publicKey,
+        buyerVault: buyerVault,
+      })
+      .signers([buyer])
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+    const buyerBalanceAfterDeposit = await provider.connection.getBalance(buyer.publicKey);
+    const vaultBalanceAfterBuyer = await provider.connection.getBalance(buyerVault);
+
+    console.log(`  Buyer balance after:   ${buyerBalanceAfterDeposit / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+    console.log(`  Vault balance:         ${vaultBalanceAfterBuyer / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+    console.log(`  ✅ Buyer deposited ${tokenBAmount.toNumber() / anchor.web3.LAMPORTS_PER_SOL} SOL to escrow\n`);
+
+    // 6. EXECUTE ATOMIC SWAP
+    console.log("⚡ STEP 6: Executing atomic swap...");
+    console.log("  📊 Pre-swap balances:");
+    console.log(`     Seller: ${sellerBalanceAfterDeposit / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+    console.log(`     Buyer:  ${buyerBalanceAfterDeposit / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+    console.log(`     Seller vault: ${vaultBalanceAfterSeller / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+    console.log(`     Buyer vault:  ${vaultBalanceAfterBuyer / anchor.web3.LAMPORTS_PER_SOL} SOL\n`);
+
+    // Execute the swap via Anchor RPC. Include both seller and buyer as signers to ensure
+    // any required signatures are present and to let Anchor manage recent blockhash fetching.
+    await program.methods
+      .executeIntrachainSwap(offerId)
+      .accountsPartial({
+        intrachainOffer: intrachainOffer,
+        seller: seller.publicKey,
+        buyer: buyer.publicKey,
+        sellerVault: sellerVault,
+        buyerVault: buyerVault,
+      })
+      .signers([seller, buyer])
+      .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+    // 7. VERIFY FINAL BALANCES
+    console.log("\n  📊 Post-swap balances:");
+
+    const sellerFinal = await provider.connection.getBalance(seller.publicKey);
+    const buyerFinal = await provider.connection.getBalance(buyer.publicKey);
+    const sellerVaultFinal = await provider.connection.getBalance(sellerVault);
+    const buyerVaultFinal = await provider.connection.getBalance(buyerVault);
+
+    console.log(`     Seller: ${sellerFinal / anchor.web3.LAMPORTS_PER_SOL} SOL (+${(sellerFinal - sellerBalanceAfterDeposit) / anchor.web3.LAMPORTS_PER_SOL} SOL)`);
+    console.log(`     Buyer:  ${buyerFinal / anchor.web3.LAMPORTS_PER_SOL} SOL (+${(buyerFinal - buyerBalanceAfterDeposit) / anchor.web3.LAMPORTS_PER_SOL} SOL)`);
+    console.log(`     Seller vault: ${sellerVaultFinal / anchor.web3.LAMPORTS_PER_SOL} SOL`);
+    console.log(`     Buyer vault:  ${buyerVaultFinal / anchor.web3.LAMPORTS_PER_SOL} SOL\n`);
+
+    // Assertions - verify that assets were transferred correctly
+    // Vaults should have much less than their deposited amounts (only rent-exempt minimum remains)
+    expect(sellerVaultFinal).to.be.below(tokenAAmount.toNumber(), "Seller vault should be drained of deposited token A");
+    expect(buyerVaultFinal).to.be.below(tokenBAmount.toNumber(), "Buyer vault should be drained of deposited token B");
+
+    const sellerGain = sellerFinal - sellerBalanceAfterDeposit;
+    const buyerGain = buyerFinal - buyerBalanceAfterDeposit;
+
+    // Allow for small transaction fee differences (within 1% of expected amount)
+    const feeTolerance = tokenBAmount.toNumber() * 0.01; // 1% tolerance
+    expect(Math.abs(sellerGain - tokenBAmount.toNumber())).to.be.below(feeTolerance, "Seller should receive approximately token B (accounting for fees)");
+    expect(Math.abs(buyerGain - tokenAAmount.toNumber())).to.be.below(feeTolerance, "Buyer should receive approximately token A (accounting for fees)");
+
+    console.log("╔══════════════════════════════════════════════════════════════╗");
+    console.log("║  ✅ SWAP SUCCESSFUL!                                         ║");
+    console.log("║  • Identities verified confidentially via MPC                ║");
+    console.log("║  • Assets swapped atomically via escrow                      ║");
+    console.log("║  • Balances validated correctly                              ║");
+    console.log("╚══════════════════════════════════════════════════════════════╝\n");
+  });
+
   async function initAddTogetherCompDef(
     program: Program<ConfidentialCrossChainExchange>,
     owner: anchor.web3.Keypair,

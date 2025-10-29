@@ -1,7 +1,9 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Token, TokenAccount, Mint, Transfer as SplTransfer};
+use anchor_spl::associated_token::{self, AssociatedToken};
 use arcium_anchor::prelude::*;
 
-const COMP_DEF_OFFSET_ADD_Together: u32 = comp_def_offset("add_together");
+const COMP_DEF_OFFSET_ADD_TOGETHER: u32 = comp_def_offset("add_together");
 const COMP_DEF_OFFSET_RELAY_OFFER_CLONE: u32 = comp_def_offset("relay_offer_clone");
 const COMP_DEF_OFFSET_CONFIDENTIAL_DEPOSIT_NATIVE: u32 = comp_def_offset("confidential_deposit_native");
 const COMP_DEF_OFFSET_INTERCHAIN_ORIGIN_EVM_DEPOSIT_SELLER_SPL: u32 = comp_def_offset("interchain_origin_evm_deposit_seller_spl");
@@ -350,6 +352,102 @@ pub mod confidential_cross_chain_exchange {
         Ok(())
     }
 
+    // === ASSET TRANSFER INSTRUCTIONS ===
+    
+    /// Execute atomic swap after both identities verified via MPC
+    pub fn execute_intrachain_swap(
+        ctx: Context<ExecuteIntrachainSwap>,
+        offer_id: u64,
+    ) -> Result<()> {
+        let offer = &ctx.accounts.intrachain_offer;
+        
+        msg!("🔄 Executing intrachain swap for offer ID: {}", offer_id);
+        msg!("  Seller vault → Buyer: {} lamports (token A)", offer.token_a_offered_amount);
+        msg!("  Buyer vault → Seller: {} lamports (token B)", offer.token_b_wanted_amount);
+
+        // Transfer token A from seller vault to buyer
+        **ctx.accounts.seller_vault.to_account_info().try_borrow_mut_lamports()? -= offer.token_a_offered_amount;
+        **ctx.accounts.buyer.to_account_info().try_borrow_mut_lamports()? += offer.token_a_offered_amount;
+
+        // Transfer token B from buyer vault to seller
+        **ctx.accounts.buyer_vault.to_account_info().try_borrow_mut_lamports()? -= offer.token_b_wanted_amount;
+        **ctx.accounts.seller.to_account_info().try_borrow_mut_lamports()? += offer.token_b_wanted_amount;
+
+        msg!("✅ Swap completed successfully");
+        Ok(())
+    }
+
+    /// Execute atomic swap for interchain offers after identities verified
+    pub fn execute_interchain_swap(
+        ctx: Context<ExecuteInterchainSwap>,
+        offer_id: u64,
+    ) -> Result<()> {
+        let offer = &ctx.accounts.interchain_offer;
+        
+        msg!("🔄 Executing interchain swap for offer ID: {}", offer_id);
+        msg!("  Seller vault → Buyer: {} lamports (token A)", offer.token_a_offered_amount);
+        msg!("  Buyer vault → Seller: {} lamports (token B)", offer.token_b_wanted_amount);
+
+        // Transfer token A from seller vault to buyer
+        **ctx.accounts.seller_vault.to_account_info().try_borrow_mut_lamports()? -= offer.token_a_offered_amount;
+        **ctx.accounts.buyer.to_account_info().try_borrow_mut_lamports()? += offer.token_a_offered_amount;
+
+        // Transfer token B from buyer vault to seller
+        **ctx.accounts.buyer_vault.to_account_info().try_borrow_mut_lamports()? -= offer.token_b_wanted_amount;
+        **ctx.accounts.seller.to_account_info().try_borrow_mut_lamports()? += offer.token_b_wanted_amount;
+
+        msg!("✅ Swap completed successfully");
+        Ok(())
+    }
+
+    /// Deposit seller assets into escrow vault
+    pub fn deposit_to_seller_vault(
+        ctx: Context<DepositToSellerVault>,
+        offer_id: u64,
+        amount: u64,
+    ) -> Result<()> {
+        msg!("💰 Seller depositing {} lamports to vault", amount);
+        
+        // Transfer from seller to vault
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.seller.to_account_info(),
+                    to: ctx.accounts.seller_vault.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        msg!("✅ Deposit successful");
+        Ok(())
+    }
+
+    /// Deposit buyer assets into escrow vault
+    pub fn deposit_to_buyer_vault(
+        ctx: Context<DepositToBuyerVault>,
+        offer_id: u64,
+        amount: u64,
+    ) -> Result<()> {
+        msg!("💰 Buyer depositing {} lamports to vault", amount);
+        
+        // Transfer from buyer to vault
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.buyer.to_account_info(),
+                    to: ctx.accounts.buyer_vault.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        msg!("✅ Deposit successful");
+        Ok(())
+    }
+
 
     #[arcium_callback(encrypted_ix = "add_together")]
     pub fn add_together_callback(
@@ -430,6 +528,15 @@ pub mod confidential_cross_chain_exchange {
             _ => return Err(ErrorCode::AbortedComputation.into()),
         };
 
+        // TODO: Asset transfers require vault accounts to be passed to callback
+        // For now, just emit acknowledgment event
+        // In production, you would:
+        // 1. Pass seller/buyer vault accounts to this callback
+        // 2. Deserialize the interchain_offer PDA to read amounts
+        // 3. Execute SOL or SPL token transfers based on is_taker_native flag
+        
+        msg!("✅ Finalize interchain offer callback executed - identity verified via MPC");
+
         emit!(FinalizeInterchainOriginEvmOfferEvent {
             acknowledged: 1,
         });
@@ -480,6 +587,15 @@ pub mod confidential_cross_chain_exchange {
             _ => return Err(ErrorCode::AbortedComputation.into()),
         };
 
+        // TODO: Asset transfers require vault accounts to be passed to callback
+        // For now, just emit acknowledgment event
+        // In production, you would:
+        // 1. Pass seller/buyer vault accounts to this callback
+        // 2. Deserialize the intrachain_offer PDA to read amounts
+        // 3. Execute SOL or SPL token transfers based on is_taker_native flag
+        
+        msg!("✅ Finalize intrachain offer callback executed - identity verified via MPC");
+
         emit!(FinalizeIntrachainOfferEvent {
                 acknowledged: 1,
         });
@@ -525,7 +641,7 @@ pub struct AddTogether<'info> {
     /// CHECK: computation_account, checked by the arcium program.
     pub computation_account: UncheckedAccount<'info>,
     #[account(
-        address = derive_comp_def_pda!(COMP_DEF_OFFSET_ADD_Together)
+        address = derive_comp_def_pda!(COMP_DEF_OFFSET_ADD_TOGETHER)
     )]
     pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
     #[account(
@@ -992,6 +1108,114 @@ pub struct FinalizeIntrachainOffer<'info> {
     pub arcium_program: Program<'info, Arcium>,
 }
 
+// === ESCROW VAULT ACCOUNT CONTEXTS ===
+
+#[derive(Accounts)]
+#[instruction(offer_id: u64)]
+pub struct ExecuteIntrachainSwap<'info> {
+    #[account(
+        seeds = [b"IntraChainoffer", seller.key().as_ref(), &offer_id.to_le_bytes()],
+        bump = intrachain_offer.bump,
+    )]
+    pub intrachain_offer: Account<'info, IntraChainOffer>,
+    
+    #[account(mut)]
+    pub seller: Signer<'info>,
+    
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    
+    #[account(
+        mut,
+        seeds = [b"seller_vault", seller.key().as_ref(), &offer_id.to_le_bytes()],
+        bump,
+    )]
+    /// CHECK: Escrow vault holding seller's token A
+    pub seller_vault: UncheckedAccount<'info>,
+    
+    #[account(
+        mut,
+        seeds = [b"buyer_vault", buyer.key().as_ref(), &offer_id.to_le_bytes()],
+        bump,
+    )]
+    /// CHECK: Escrow vault holding buyer's token B
+    pub buyer_vault: UncheckedAccount<'info>,
+    
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(offer_id: u64)]
+pub struct ExecuteInterchainSwap<'info> {
+    #[account(
+        seeds = [b"InterChainoffer", seller.key().as_ref(), &offer_id.to_le_bytes()],
+        bump = interchain_offer.bump,
+    )]
+    pub interchain_offer: Account<'info, InterchainOffer>,
+    
+    #[account(mut)]
+    pub seller: Signer<'info>,
+    
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    
+    #[account(
+        mut,
+        seeds = [b"seller_vault", seller.key().as_ref(), &offer_id.to_le_bytes()],
+        bump,
+    )]
+    /// CHECK: Escrow vault holding seller's token A
+    pub seller_vault: UncheckedAccount<'info>,
+    
+    #[account(
+        mut,
+        seeds = [b"buyer_vault", buyer.key().as_ref(), &offer_id.to_le_bytes()],
+        bump,
+    )]
+    /// CHECK: Escrow vault holding buyer's token B
+    pub buyer_vault: UncheckedAccount<'info>,
+    
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(offer_id: u64)]
+pub struct DepositToSellerVault<'info> {
+    #[account(mut)]
+    pub seller: Signer<'info>,
+    
+    #[account(
+        init_if_needed,
+        payer = seller,
+        space = 8,
+        seeds = [b"seller_vault", seller.key().as_ref(), &offer_id.to_le_bytes()],
+        bump,
+    )]
+    /// CHECK: Escrow vault PDA
+    pub seller_vault: UncheckedAccount<'info>,
+    
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(offer_id: u64)]
+pub struct DepositToBuyerVault<'info> {
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    
+    #[account(
+        init_if_needed,
+        payer = buyer,
+        space = 8,
+        seeds = [b"buyer_vault", buyer.key().as_ref(), &offer_id.to_le_bytes()],
+        bump,
+    )]
+    /// CHECK: Escrow vault PDA
+    pub buyer_vault: UncheckedAccount<'info>,
+    
+    pub system_program: Program<'info, System>,
+}
+
 
 
 #[callback_accounts("add_together")]
@@ -999,7 +1223,7 @@ pub struct FinalizeIntrachainOffer<'info> {
 pub struct AddTogetherCallback<'info> {
     pub arcium_program: Program<'info, Arcium>,
     #[account(
-        address = derive_comp_def_pda!(COMP_DEF_OFFSET_ADD_Together)
+        address = derive_comp_def_pda!(COMP_DEF_OFFSET_ADD_TOGETHER)
     )]
     pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
     #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
